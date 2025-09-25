@@ -119,34 +119,140 @@ def create_lightweight_app():
         
         # 1. CHOROPLETH HEATMAP - The main feature!
         if columns['municipality'] and columns['cases']:
-            # Create municipality-level summary for the map
-            muni_summary = data.groupby(columns['municipality']).agg({
-                columns['cases']: 'sum',
-                'POPULATION': 'first',
-                'NIS5': 'first' if 'NIS5' in data.columns else None
-            }).reset_index()
-            
-            if 'POPULATION' in data.columns:
-                muni_summary['cases_per_100k'] = (muni_summary[columns['cases']] / muni_summary['POPULATION'] * 100000).round(1)
-            
-            # Create choropleth map using municipality names
-            fig_map = px.choropleth(muni_summary,
-                                  locations=columns['municipality'],
-                                  color=columns['cases'],
-                                  hover_name=columns['municipality'],
-                                  hover_data={'cases_per_100k': True} if 'cases_per_100k' in muni_summary.columns else None,
-                                  color_continuous_scale="Reds",
-                                  title="🗺️ COVID-19 Cases Heatmap by Belgian Municipality (October 2020)",
-                                  labels={columns['cases']: 'Total Cases', columns['municipality']: 'Municipality'})
-            
-            # Focus on Belgium region
-            fig_map.update_geos(
-                center=dict(lat=50.5, lon=4.5),  # Belgium center
-                projection_scale=15,
-                visible=False
-            )
-            fig_map.update_layout(height=600, showlegend=True)
-            figures.append(dcc.Graph(figure=fig_map))
+            try:
+                # Create municipality-level summary for the map
+                muni_summary = data.groupby(columns['municipality']).agg({
+                    columns['cases']: 'sum',
+                    'POPULATION': 'first',
+                    'NIS5': 'first' if 'NIS5' in data.columns else None,
+                    'CD_REFNIS': 'first' if 'CD_REFNIS' in data.columns else None,
+                    'PROVINCE': 'first' if 'PROVINCE' in data.columns else None,
+                    'REGION': 'first' if 'REGION' in data.columns else None
+                }).reset_index()
+                
+                if 'POPULATION' in data.columns:
+                    muni_summary['cases_per_100k'] = (muni_summary[columns['cases']] / muni_summary['POPULATION'] * 100000).round(1)
+                
+                # Since we can't use detailed Belgian municipality boundaries without shapefiles,
+                # let's create a meaningful geographic visualization using available data
+                
+                # Option 1: Try province-level choropleth (more likely to work)
+                if 'PROVINCE' in muni_summary.columns:
+                    province_data = data.groupby('PROVINCE').agg({
+                        columns['cases']: 'sum',
+                        'POPULATION': 'sum'
+                    }).reset_index()
+                    province_data['cases_per_100k'] = (province_data[columns['cases']] / province_data['POPULATION'] * 100000).round(1)
+                    
+                    # Create a scatter plot on map using coordinates for Belgian provinces
+                    belgium_provinces = {
+                        'Antwerp': {'lat': 51.2, 'lon': 4.4},
+                        'East Flanders': {'lat': 51.0, 'lon': 3.7},
+                        'West Flanders': {'lat': 51.0, 'lon': 3.1},
+                        'Limburg': {'lat': 50.9, 'lon': 5.3},
+                        'Flemish Brabant': {'lat': 50.9, 'lon': 4.7},
+                        'Brussels': {'lat': 50.85, 'lon': 4.35},
+                        'Walloon Brabant': {'lat': 50.7, 'lon': 4.6},
+                        'Liège': {'lat': 50.6, 'lon': 5.6},
+                        'Luxembourg': {'lat': 50.0, 'lon': 5.5},
+                        'Namur': {'lat': 50.5, 'lon': 4.9},
+                        'Hainaut': {'lat': 50.4, 'lon': 4.0}
+                    }
+                    
+                    # Match provinces and add coordinates
+                    for idx, row in province_data.iterrows():
+                        province = row['PROVINCE']
+                        for prov_name, coords in belgium_provinces.items():
+                            if prov_name.lower() in province.lower() or province.lower() in prov_name.lower():
+                                province_data.loc[idx, 'lat'] = coords['lat']
+                                province_data.loc[idx, 'lon'] = coords['lon']
+                                break
+                    
+                    # Create scatter plot on map
+                    fig_map = px.scatter_mapbox(province_data,
+                                              lat='lat', 
+                                              lon='lon',
+                                              size=columns['cases'],
+                                              color='cases_per_100k',
+                                              hover_name='PROVINCE',
+                                              hover_data={columns['cases']: True, 'cases_per_100k': True},
+                                              color_continuous_scale="Reds",
+                                              size_max=50,
+                                              zoom=6.5,
+                                              center={'lat': 50.5, 'lon': 4.5},
+                                              title="🗺️ COVID-19 Cases by Belgian Province (October 2020)",
+                                              labels={'cases_per_100k': 'Cases per 100k', columns['cases']: 'Total Cases'})
+                    
+                    fig_map.update_layout(mapbox_style="open-street-map", height=600)
+                    figures.append(dcc.Graph(figure=fig_map))
+                
+                # Option 2: Fallback to municipality scatter plot
+                else:
+                    # Create a simple scatter geographic visualization
+                    # Use the top municipalities with estimated coordinates
+                    top_munis = muni_summary.nlargest(20, columns['cases']).copy()
+                    
+                    # Add approximate coordinates for major Belgian cities/municipalities
+                    belgium_cities = {
+                        'Antwerpen': {'lat': 51.2, 'lon': 4.4},
+                        'Brussels': {'lat': 50.85, 'lon': 4.35},
+                        'Bruxelles': {'lat': 50.85, 'lon': 4.35},
+                        'Gent': {'lat': 51.05, 'lon': 3.72},
+                        'Charleroi': {'lat': 50.41, 'lon': 4.44},
+                        'Liège': {'lat': 50.63, 'lon': 5.57},
+                        'Bruges': {'lat': 51.2, 'lon': 3.22},
+                        'Namur': {'lat': 50.47, 'lon': 4.87},
+                        'Leuven': {'lat': 50.88, 'lon': 4.70},
+                        'Mons': {'lat': 50.45, 'lon': 3.95}
+                    }
+                    
+                    # Add coordinates to municipalities
+                    for idx, row in top_munis.iterrows():
+                        municipality = row[columns['municipality']]
+                        found = False
+                        for city_name, coords in belgium_cities.items():
+                            if city_name.lower() in municipality.lower():
+                                top_munis.loc[idx, 'lat'] = coords['lat'] + (hash(municipality) % 100 - 50) / 1000  # Add small random offset
+                                top_munis.loc[idx, 'lon'] = coords['lon'] + (hash(municipality) % 100 - 50) / 1000
+                                found = True
+                                break
+                        
+                        if not found:
+                            # Random coordinates within Belgium
+                            top_munis.loc[idx, 'lat'] = 50.5 + (hash(municipality) % 200 - 100) / 100
+                            top_munis.loc[idx, 'lon'] = 4.5 + (hash(municipality) % 200 - 100) / 100
+                    
+                    fig_map = px.scatter_mapbox(top_munis,
+                                              lat='lat', 
+                                              lon='lon',
+                                              size=columns['cases'],
+                                              color='cases_per_100k' if 'cases_per_100k' in top_munis.columns else columns['cases'],
+                                              hover_name=columns['municipality'],
+                                              hover_data={columns['cases']: True},
+                                              color_continuous_scale="Reds",
+                                              size_max=30,
+                                              zoom=6.5,
+                                              center={'lat': 50.5, 'lon': 4.5},
+                                              title="🗺️ COVID-19 Cases - Top Belgian Municipalities (October 2020)",
+                                              labels={columns['cases']: 'Total Cases'})
+                    
+                    fig_map.update_layout(mapbox_style="open-street-map", height=600)
+                    figures.append(dcc.Graph(figure=fig_map))
+                    
+            except Exception as e:
+                logger.error(f"❌ Failed to create choropleth map: {e}")
+                # Create a simple province-level bar chart as fallback
+                if 'PROVINCE' in data.columns:
+                    province_summary = data.groupby('PROVINCE')[columns['cases']].sum().reset_index()
+                    fig_fallback = px.bar(province_summary,
+                                        x='PROVINCE',
+                                        y=columns['cases'],
+                                        title="🗺️ COVID-19 Cases by Belgian Province (Map Fallback)",
+                                        color=columns['cases'],
+                                        color_continuous_scale="Reds")
+                    fig_fallback.update_xaxes(tickangle=45)
+                    fig_fallback.update_layout(height=400)
+                    figures.append(dcc.Graph(figure=fig_fallback))
         
         # 2. Time series plot if we have date and cases
         if columns['date'] and columns['cases']:
