@@ -175,7 +175,7 @@ def create_dashboard_data(covid_data, shapefile_data):
     return map_geo_data
 
 def setup_time_controls(dashboard_data):
-    """Setup time controls with adaptive time marks"""
+    """Setup time controls with adaptive time marks using week-year format"""
     logger.info("📅 Setting up time controls...")
     
     time_column = None
@@ -199,29 +199,31 @@ def setup_time_controls(dashboard_data):
     time_marks = {}
     logger.info(f"📅 Creating time controls for {total_periods} periods")
     
-    if 'date' in time_column.lower():
-        if total_periods <= 10:
-            # Few periods: Show all
-            for i, date_val in enumerate(unique_times):
-                if pd.notna(date_val) and hasattr(date_val, 'strftime'):
-                    time_marks[i] = date_val.strftime('%m-%d')
-                else:
-                    time_marks[i] = str(date_val)
+    def format_date_to_week_year(date_val):
+        """Convert a date to W{week}-{year} format (e.g., W1-20)"""
+        if pd.notna(date_val) and hasattr(date_val, 'isocalendar'):
+            year, week, _ = date_val.isocalendar()
+            # Use 2-digit year for compactness (2020 -> 20)
+            year_short = year % 100
+            return f'W{week}-{year_short:02d}'
         else:
-            # More periods: Show every few
-            step = max(2, total_periods // 5)
-            for i in range(0, total_periods, step):
-                date_val = unique_times[i]
-                if pd.notna(date_val) and hasattr(date_val, 'strftime'):
-                    time_marks[i] = date_val.strftime('%m-%d')
-                else:
-                    time_marks[i] = str(date_val)
-            
-            # Always include the last period
-            if (total_periods - 1) not in time_marks:
-                date_val = unique_times[-1]
-                if pd.notna(date_val) and hasattr(date_val, 'strftime'):
-                    time_marks[total_periods - 1] = date_val.strftime('%m-%d')
+            return str(date_val)
+    
+    if 'date' in time_column.lower():
+        # ULTRA SIMPLE: Show only 4 strategic markers across the entire timeline
+        total_periods = len(unique_times)
+        
+        # Just show: Start, Mid-2020, Mid-2021, End
+        strategic_indices = [
+            0,                          # Start (2020)
+            total_periods // 4,         # Around mid-2020
+            total_periods // 2,         # Around mid-2021  
+            total_periods - 1           # End (2022)
+        ]
+        
+        for i in strategic_indices:
+            if i < total_periods:
+                time_marks[i] = format_date_to_week_year(unique_times[i])
     else:
         # Non-date columns: Simple numeric
         if total_periods <= 10:
@@ -234,6 +236,7 @@ def setup_time_controls(dashboard_data):
                 time_marks[total_periods - 1] = str(unique_times[-1])
     
     logger.info(f"✅ Time controls: {len(time_range)} periods, {len(time_marks)} marks")
+    logger.info(f"📅 Sample labels: {list(time_marks.values())[:5]}...")
     
     return time_range, time_marks, unique_times
 
