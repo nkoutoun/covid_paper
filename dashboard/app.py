@@ -41,15 +41,15 @@ def load_and_preprocess_data():
     """Load and preprocess data with proper date handling"""
     logger.info("📊 Loading and preprocessing COVID data...")
     
-    # Load the demo data
-    demo_file = Path("data/demo_data_october_2020.csv")
+    # Load the full intermediate data (all dates)
+    data_file = Path("data/intermediate_data_covid_gri.csv")
     
-    if not demo_file.exists():
-        logger.error(f"❌ Demo data not found: {demo_file}")
-        raise FileNotFoundError(f"Demo data not found: {demo_file}")
+    if not data_file.exists():
+        logger.error(f"❌ Data file not found: {data_file}")
+        raise FileNotFoundError(f"Data file not found: {data_file}")
     
-    covid_gri = pd.read_csv(demo_file)
-    logger.info(f"📈 Loaded {len(covid_gri):,} records")
+    covid_gri = pd.read_csv(data_file)
+    logger.info(f"📈 Loaded {len(covid_gri):,} records (full dataset)")
     
     # Convert date if needed
     if 'date' in covid_gri.columns:
@@ -61,18 +61,15 @@ def load_and_preprocess_data():
         covid_gri['date'] = covid_gri.apply(lambda row: iso_to_date(row['year'], row['week']), axis=1)
         covid_gri = covid_gri.drop(['year', 'week'], axis=1)
     
-    # Filter to October 2020 data for performance
+    # Show the full date range for the complete dataset
     if 'date' in covid_gri.columns:
-        start_date = datetime(2020, 10, 5)   # Monday of week 41, 2020
-        end_date = datetime(2020, 10, 26)    # Monday of week 44, 2020
-        
-        covid_gri = covid_gri[
-            (covid_gri['date'] >= start_date) & 
-            (covid_gri['date'] <= end_date)
-        ].copy()
-        
-        logger.info(f"📅 Filtered to {len(covid_gri)} rows for October 2020")
+        logger.info(f"📅 Full dataset: {len(covid_gri):,} records")
         logger.info(f"📅 Date range: {covid_gri['date'].min()} to {covid_gri['date'].max()}")
+    elif 'year' in covid_gri.columns and 'week' in covid_gri.columns:
+        year_range = f"{covid_gri['year'].min()}-{covid_gri['year'].max()}"
+        week_range = f"W{covid_gri['week'].min()}-W{covid_gri['week'].max()}"
+        logger.info(f"📅 Full dataset: {len(covid_gri):,} records")
+        logger.info(f"📅 Period range: {year_range}, {week_range}")
     
     return covid_gri
 
@@ -153,21 +150,11 @@ def create_dashboard_data(covid_data, shapefile_data):
     if 'date' in map_geo_data.columns:
         logger.info(f"📅 Date range: {map_geo_data['date'].min()} to {map_geo_data['date'].max()}")
     
-    # Show sample of merged data
-    logger.info(f"\n📋 Sample of merged data:")
-    sample_cols = ['NIS5', 'T_MUN_NL', 'date', 'CASES', 'SI', 'POPULATION']
-    available_cols = [col for col in sample_cols if col in map_geo_data.columns]
-    logger.info(f"Available sample columns: {available_cols}")
-    
-    # Check time period coverage
+    # Verify data coverage
     if 'date' in map_geo_data.columns:
         unique_periods = map_geo_data['date'].nunique()
         unique_municipalities = map_geo_data['NIS5'].nunique()
-        logger.info(f"\n📊 Data coverage:")
-        logger.info(f"  • {unique_municipalities} unique municipalities")
-        logger.info(f"  • {unique_periods} unique time periods")
-        logger.info(f"  • Expected total records: {unique_municipalities * unique_periods:,}")
-        logger.info(f"  • Actual records: {len(map_geo_data):,}")
+        logger.info(f"📊 Coverage: {unique_municipalities} municipalities × {unique_periods} periods = {len(map_geo_data):,} records")
     
     # Essential columns for dashboard (including province like in working version)
     essential_columns = [
@@ -178,8 +165,7 @@ def create_dashboard_data(covid_data, shapefile_data):
     available_columns = [col for col in essential_columns if col in map_geo_data.columns]
     map_geo_data = map_geo_data[available_columns].copy()
     
-    logger.info(f"📊 Using {len(map_geo_data):,} records")
-    logger.info(f"📋 Available columns: {list(map_geo_data.columns)}")
+    logger.info(f"📊 Final dataset: {len(map_geo_data):,} records, {len(map_geo_data.columns)} columns")
     
     # Fill missing values with 0 for main variables
     for col in ['CASES', 'SI', 'POPULATION', 'vacc_pct']:
@@ -208,11 +194,10 @@ def setup_time_controls(dashboard_data):
     unique_times = sorted([t for t in dashboard_data[time_column].unique() if pd.notna(t)])
     time_range = list(range(len(unique_times)))
     
-    logger.info(f"📅 Found {len(unique_times)} unique time periods")
-    
     # Create adaptive time marks
     total_periods = len(unique_times)
     time_marks = {}
+    logger.info(f"📅 Creating time controls for {total_periods} periods")
     
     if 'date' in time_column.lower():
         if total_periods <= 10:
@@ -248,7 +233,7 @@ def setup_time_controls(dashboard_data):
             if (total_periods - 1) not in time_marks:
                 time_marks[total_periods - 1] = str(unique_times[-1])
     
-    logger.info(f"📅 Time range: {len(time_range)} periods, {len(time_marks)} marks")
+    logger.info(f"✅ Time controls: {len(time_range)} periods, {len(time_marks)} marks")
     
     return time_range, time_marks, unique_times
 
@@ -289,14 +274,10 @@ def preprocess_and_cache_data(dashboard_data, time_column, unique_times):
     
     logger.info("✅ All time periods pre-processed and cached!")
     
-    # Debug info like in working version
-    logger.info(f"🔍 Debug Info:")
-    logger.info(f"   - Shape: {dashboard_data.shape}")
+    # Final data summary
     if 'date' in dashboard_data.columns:
-        logger.info(f"   - Date column: {dashboard_data['date'].dtype}")
-        unique_dates = sorted([d for d in dashboard_data['date'].unique() if pd.notna(d)])
-        logger.info(f"   - Unique dates: {unique_dates}")
-        logger.info(f"   - Date range: {dashboard_data['date'].min()} to {dashboard_data['date'].max()}")
+        date_range = f"{dashboard_data['date'].min().strftime('%Y-%m-%d')} to {dashboard_data['date'].max().strftime('%Y-%m-%d')}"
+        logger.info(f"🔍 Final data: {dashboard_data.shape[0]:,} records × {dashboard_data.shape[1]} columns, {date_range}")
     
     return cached_data, cached_geojson
 
