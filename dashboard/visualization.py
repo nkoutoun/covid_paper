@@ -17,7 +17,7 @@ import logging
 import dash
 from dash import dcc, html, Input, Output
 
-from .config import (
+from config import (
     DASHBOARD_CONFIG, VARIABLE_OPTIONS, COLOR_SCALES, VARIABLE_LABELS,
     HOVER_LABELS, FILE_PATHS, DATA_PROCESSING
 )
@@ -78,7 +78,7 @@ def load_and_process_geospatial_data(data: pd.DataFrame,
             logger.warning("⚠️ Shapefile not found locally, attempting to download...")
             
             # Try to download the shapefile
-            from .data_processing import download_and_extract_shapefile
+            from data_processing import download_and_extract_shapefile
             
             if download_and_extract_shapefile():
                 # Re-check for shapefile after download

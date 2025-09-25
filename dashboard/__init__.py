@@ -24,9 +24,9 @@ Modules:
     - main: Main execution and orchestration
 """
 
-from .main import main, quick_start_demo, run_data_pipeline, create_and_launch_dashboard
-from .config import VARIABLE_OPTIONS, DASHBOARD_CONFIG
-from .utils import setup_logging
+from main import main, quick_start_demo, run_data_pipeline, create_and_launch_dashboard
+from config import VARIABLE_OPTIONS, DASHBOARD_CONFIG
+from utils import setup_logging
 
 __version__ = "1.0.0"
 __author__ = "Research Team"

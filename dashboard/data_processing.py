@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple
 import logging
 
-from .config import (
+from config import (
     DATA_URLS, FILE_PATHS, TIME_PERIODS, REGIONS, PROVINCES, 
     DATA_PROCESSING, DISPLAY_SETTINGS
 )

@@ -9,15 +9,15 @@ import logging
 from datetime import datetime
 from typing import Optional, Tuple
 
-from .config import FILE_PATHS, DASHBOARD_CONFIG
-from .data_processing import load_and_process_all_data
-from .visualization import (
+from config import FILE_PATHS, DASHBOARD_CONFIG
+from data_processing import load_and_process_all_data
+from visualization import (
     load_and_process_geospatial_data, 
     prepare_dashboard_data,
     create_dashboard_app,
     launch_dashboard
 )
-from .utils import setup_logging, validate_data_quality
+from utils import setup_logging, validate_data_quality
 
 # Configure logging
 setup_logging()
@@ -86,7 +86,7 @@ def create_and_launch_dashboard(data_file: Optional[str] = None,
         
         # Convert date information
         if 'date' not in covid_data.columns and 'year' in covid_data.columns and 'week' in covid_data.columns:
-            from .visualization import iso_to_date
+            from visualization import iso_to_date
             covid_data['date'] = covid_data.apply(
                 lambda row: iso_to_date(row['year'], row['week']), axis=1
             )
@@ -201,12 +201,12 @@ def _create_quick_demo_dataset() -> str:
     """
     from datetime import datetime
     import pandas as pd
-    from .data_processing import (
+    from data_processing import (
         download_and_load_covid_cases, download_and_load_vaccination_data,
         load_population_data, load_oxford_stringency_data,
         create_week_to_month_mapping, process_oxford_stringency_data
     )
-    from .visualization import iso_to_date
+    from visualization import iso_to_date
     
     demo_file = FILE_PATHS["intermediate_data"].parent / "demo_data_october_2020.csv"
     
