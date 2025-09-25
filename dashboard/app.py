@@ -139,18 +139,64 @@ def create_municipality_choropleth_app():
             gdf = gpd.read_file(shapefile_path)
             logger.info(f"✅ Loaded shapefile with {len(gdf):,} sectors")
             
+            # MEMORY OPTIMIZATION: Filter to fewer records if too many
+            if len(gdf) > 5000:
+                logger.info(f"⚡ Too many sectors ({len(gdf):,}), sampling for memory efficiency...")
+                # Take every Nth sector to reduce memory usage
+                sample_rate = max(1, len(gdf) // 2000)  # Target ~2000 sectors max
+                gdf = gdf.iloc[::sample_rate].copy()
+                logger.info(f"✅ Reduced to {len(gdf):,} sectors for memory efficiency")
+            
             # Convert to WGS84 for web mapping
             if gdf.crs != 'EPSG:4326':
+                logger.info("🔄 Converting coordinate system to WGS84...")
                 gdf = gdf.to_crs('EPSG:4326')
             
-            # Simplify geometries for performance
-            gdf['geometry'] = gdf['geometry'].simplify(tolerance=0.001, preserve_topology=True)
+            # AGGRESSIVE geometry simplification for memory
+            logger.info("⚡ Applying aggressive geometry simplification for 512MB limit...")
+            gdf['geometry'] = gdf['geometry'].simplify(tolerance=0.01, preserve_topology=False)  # Much higher tolerance
+            
+            # Further memory optimization: remove unnecessary columns
+            essential_cols = ['geometry']
+            for col in ['TX_DESCR_NL', 'TX_DESCR_FR', 'CD_REFNIS', 'NIS5']:
+                if col in gdf.columns:
+                    essential_cols.append(col)
+            
+            gdf = gdf[essential_cols].copy()
+            logger.info(f"✅ Optimized to {len(essential_cols)} columns for memory efficiency")
+            
+            # ADDITIONAL MEMORY OPTIMIZATION: Aggregate sectors to municipalities if still too many
+            if len(gdf) > 3000:
+                logger.info(f"⚡ Still too many sectors ({len(gdf):,}), attempting municipality aggregation...")
+                try:
+                    # Group by municipality name and combine geometries
+                    municipality_col = None
+                    for col in ['TX_DESCR_NL', 'TX_DESCR_FR']:
+                        if col in gdf.columns:
+                            municipality_col = col
+                            break
+                    
+                    if municipality_col:
+                        logger.info(f"🔄 Aggregating sectors by {municipality_col}...")
+                        gdf_agg = gdf.groupby(municipality_col).agg({
+                            'geometry': lambda x: x.unary_union  # Combine geometries
+                        }).reset_index()
+                        gdf = gpd.GeoDataFrame(gdf_agg, geometry='geometry')
+                        logger.info(f"✅ Aggregated to {len(gdf):,} municipalities")
+                    else:
+                        logger.warning("⚠️ No municipality column found for aggregation")
+                
+                except Exception as agg_error:
+                    logger.error(f"❌ Aggregation failed: {agg_error}")
+                    # Continue with sampled data
             
             # Merge with COVID data based on municipality names
             # Find common column for merging
             merge_col = None
-            for col in ['TX_DESCR_NL', 'TX_DESCR_FR', 'CD_REFNIS']:
-                if col in gdf.columns and 'TX_DESCR_NL_x' in data.columns:
+            available_cols = [col for col in ['TX_DESCR_NL', 'TX_DESCR_FR', 'CD_REFNIS'] if col in gdf.columns]
+            
+            for col in available_cols:
+                if 'TX_DESCR_NL_x' in data.columns:
                     # Try to merge
                     test_merge = data.merge(gdf[[col, 'geometry']], 
                                           left_on='TX_DESCR_NL_x', 
@@ -158,7 +204,7 @@ def create_municipality_choropleth_app():
                                           how='inner')
                     if len(test_merge) > 0:
                         merge_col = col
-                        logger.info(f"✅ Found merge column: {col}")
+                        logger.info(f"✅ Found merge column: {col} with {len(test_merge)} matches")
                         break
             
             if merge_col:
@@ -170,9 +216,12 @@ def create_municipality_choropleth_app():
                 
                 # Convert to GeoDataFrame
                 map_geo_data = gpd.GeoDataFrame(map_data, geometry='geometry')
-                logger.info(f"✅ Created geospatial data with {len(map_geo_data):,} municipalities")
+                logger.info(f"✅ Created geospatial data with {len(map_geo_data):,} geographic units")
+                logger.info(f"💾 Final memory usage: ~{len(map_geo_data) * len(map_geo_data.columns) * 100 / 1024**2:.1f}MB estimated")
                 
             else:
+                logger.error(f"❌ No merge possible. Available shapefile columns: {available_cols}")
+                logger.error(f"❌ Looking for match with data column: TX_DESCR_NL_x")
                 raise Exception("No suitable merge column found between data and shapefile")
                 
         except Exception as shapefile_error:
