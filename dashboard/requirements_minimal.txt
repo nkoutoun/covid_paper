@@ -1,0 +1,4 @@
+# Minimal requirements for memory-optimized deployment
+dash==3.2.0
+pandas==2.3.2
+plotly==6.3.0

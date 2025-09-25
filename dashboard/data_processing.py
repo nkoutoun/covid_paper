@@ -96,7 +96,7 @@ def download_and_extract_shapefile() -> bool:
         return False
 
 
-def download_and_load_covid_cases() -> pd.DataFrame:
+def download_and_load_covid_cases(memory_optimized: bool = False) -> pd.DataFrame:
     """
     Download and load COVID-19 cases data from Sciensano.
     
