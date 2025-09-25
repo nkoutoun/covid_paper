@@ -223,7 +223,7 @@ app = create_lightweight_app()
 # For Render Web Service
 if __name__ == "__main__":
     config = get_production_config()
-    app.run_server(
+    app.run(
         host=config["host"],
         port=config["port"],
         debug=config["debug"]
