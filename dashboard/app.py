@@ -117,7 +117,38 @@ def create_lightweight_app():
         # Create visualizations based on available data
         figures = []
         
-        # Time series plot if we have date and cases
+        # 1. CHOROPLETH HEATMAP - The main feature!
+        if columns['municipality'] and columns['cases']:
+            # Create municipality-level summary for the map
+            muni_summary = data.groupby(columns['municipality']).agg({
+                columns['cases']: 'sum',
+                'POPULATION': 'first',
+                'NIS5': 'first' if 'NIS5' in data.columns else None
+            }).reset_index()
+            
+            if 'POPULATION' in data.columns:
+                muni_summary['cases_per_100k'] = (muni_summary[columns['cases']] / muni_summary['POPULATION'] * 100000).round(1)
+            
+            # Create choropleth map using municipality names
+            fig_map = px.choropleth(muni_summary,
+                                  locations=columns['municipality'],
+                                  color=columns['cases'],
+                                  hover_name=columns['municipality'],
+                                  hover_data={'cases_per_100k': True} if 'cases_per_100k' in muni_summary.columns else None,
+                                  color_continuous_scale="Reds",
+                                  title="🗺️ COVID-19 Cases Heatmap by Belgian Municipality (October 2020)",
+                                  labels={columns['cases']: 'Total Cases', columns['municipality']: 'Municipality'})
+            
+            # Focus on Belgium region
+            fig_map.update_geos(
+                center=dict(lat=50.5, lon=4.5),  # Belgium center
+                projection_scale=15,
+                visible=False
+            )
+            fig_map.update_layout(height=600, showlegend=True)
+            figures.append(dcc.Graph(figure=fig_map))
+        
+        # 2. Time series plot if we have date and cases
         if columns['date'] and columns['cases']:
             # Ensure date column is datetime
             if not pd.api.types.is_datetime64_any_dtype(data[columns['date']]):
@@ -126,23 +157,26 @@ def create_lightweight_app():
             # Aggregate by date if needed
             daily_data = data.groupby(columns['date'])[columns['cases']].sum().reset_index()
             
-            fig1 = px.line(daily_data, 
+            fig_time = px.line(daily_data, 
                           x=columns['date'], 
                           y=columns['cases'],
-                          title='COVID-19 Cases Over Time (October 2020 Sample)')
-            figures.append(dcc.Graph(figure=fig1))
+                          title='📈 COVID-19 Cases Over Time (October 2020 Sample)')
+            fig_time.update_layout(height=400)
+            figures.append(dcc.Graph(figure=fig_time))
         
-        # Cases by municipality if available
+        # 3. Cases by municipality bar chart
         if columns['municipality'] and columns['cases']:
             muni_data = data.groupby(columns['municipality'])[columns['cases']].sum().reset_index()
-            muni_data = muni_data.nlargest(10, columns['cases'])  # Top 10 municipalities
+            muni_data = muni_data.nlargest(15, columns['cases'])  # Top 15 municipalities
             
-            fig2 = px.bar(muni_data,
-                         x=columns['municipality'], 
-                         y=columns['cases'],
-                         title='Top 10 Municipalities by COVID-19 Cases')
-            fig2.update_xaxes(tickangle=45)
-            figures.append(dcc.Graph(figure=fig2))
+            fig_bar = px.bar(muni_data,
+                         x=columns['cases'], 
+                         y=columns['municipality'],
+                         orientation='h',
+                         title='🏆 Top 15 Municipalities by COVID-19 Cases',
+                         labels={columns['cases']: 'Total Cases', columns['municipality']: 'Municipality'})
+            fig_bar.update_layout(height=500, yaxis={'categoryorder':'total ascending'})
+            figures.append(dcc.Graph(figure=fig_bar))
         
         # Summary statistics
         stats_content = [
