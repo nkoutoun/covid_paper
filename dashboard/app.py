@@ -112,49 +112,68 @@ def create_municipality_choropleth_app():
             logger.info("📦 Loading shapefile data for municipality boundaries...")
             shapefile_path = Path("data_public/shapefiles/sh_statbel_statistical_sectors_20190101.shp")
             
-            if shapefile_path.exists():
-                # Load the shapefile
-                gdf = gpd.read_file(shapefile_path)
-                logger.info(f"✅ Loaded shapefile with {len(gdf):,} sectors")
-                
-                # Convert to WGS84 for web mapping
-                if gdf.crs != 'EPSG:4326':
-                    gdf = gdf.to_crs('EPSG:4326')
-                
-                # Simplify geometries for performance
-                gdf['geometry'] = gdf['geometry'].simplify(tolerance=0.001, preserve_topology=True)
-                
-                # Merge with COVID data based on municipality names
-                # Find common column for merging
-                merge_col = None
-                for col in ['TX_DESCR_NL', 'TX_DESCR_FR', 'CD_REFNIS']:
-                    if col in gdf.columns and 'TX_DESCR_NL_x' in data.columns:
-                        # Try to merge
-                        test_merge = data.merge(gdf[[col, 'geometry']], 
-                                              left_on='TX_DESCR_NL_x', 
-                                              right_on=col, 
-                                              how='inner')
-                        if len(test_merge) > 0:
-                            merge_col = col
-                            logger.info(f"✅ Found merge column: {col}")
-                            break
-                
-                if merge_col:
-                    # Merge data with geometry
-                    map_data = data.merge(gdf[[merge_col, 'geometry']], 
-                                        left_on='TX_DESCR_NL_x', 
-                                        right_on=merge_col, 
-                                        how='inner')
+            # If shapefile doesn't exist, try to download it automatically
+            if not shapefile_path.exists():
+                logger.info("📦 Shapefile not found, attempting automatic download...")
+                try:
+                    # Import the download function
+                    from data_processing import download_and_extract_shapefile
                     
-                    # Convert to GeoDataFrame
-                    map_geo_data = gpd.GeoDataFrame(map_data, geometry='geometry')
-                    logger.info(f"✅ Created geospatial data with {len(map_geo_data):,} municipalities")
+                    # Attempt download
+                    download_success = download_and_extract_shapefile()
                     
-                else:
-                    raise Exception("No suitable merge column found between data and shapefile")
-                    
+                    if not download_success or not shapefile_path.exists():
+                        logger.error("❌ Automatic shapefile download failed")
+                        raise Exception("Shapefile download failed")
+                    else:
+                        logger.info("✅ Shapefile downloaded successfully!")
+                        
+                except ImportError as e:
+                    logger.error(f"❌ Could not import download function: {e}")
+                    raise Exception("Shapefile download function not available")
+                except Exception as e:
+                    logger.error(f"❌ Shapefile download failed: {e}")
+                    raise Exception(f"Failed to download shapefile: {e}")
+            
+            # Load the shapefile
+            gdf = gpd.read_file(shapefile_path)
+            logger.info(f"✅ Loaded shapefile with {len(gdf):,} sectors")
+            
+            # Convert to WGS84 for web mapping
+            if gdf.crs != 'EPSG:4326':
+                gdf = gdf.to_crs('EPSG:4326')
+            
+            # Simplify geometries for performance
+            gdf['geometry'] = gdf['geometry'].simplify(tolerance=0.001, preserve_topology=True)
+            
+            # Merge with COVID data based on municipality names
+            # Find common column for merging
+            merge_col = None
+            for col in ['TX_DESCR_NL', 'TX_DESCR_FR', 'CD_REFNIS']:
+                if col in gdf.columns and 'TX_DESCR_NL_x' in data.columns:
+                    # Try to merge
+                    test_merge = data.merge(gdf[[col, 'geometry']], 
+                                          left_on='TX_DESCR_NL_x', 
+                                          right_on=col, 
+                                          how='inner')
+                    if len(test_merge) > 0:
+                        merge_col = col
+                        logger.info(f"✅ Found merge column: {col}")
+                        break
+            
+            if merge_col:
+                # Merge data with geometry
+                map_data = data.merge(gdf[[merge_col, 'geometry']], 
+                                    left_on='TX_DESCR_NL_x', 
+                                    right_on=merge_col, 
+                                    how='inner')
+                
+                # Convert to GeoDataFrame
+                map_geo_data = gpd.GeoDataFrame(map_data, geometry='geometry')
+                logger.info(f"✅ Created geospatial data with {len(map_geo_data):,} municipalities")
+                
             else:
-                raise Exception(f"Shapefile not found: {shapefile_path}")
+                raise Exception("No suitable merge column found between data and shapefile")
                 
         except Exception as shapefile_error:
             logger.error(f"❌ Shapefile loading failed: {shapefile_error}")
