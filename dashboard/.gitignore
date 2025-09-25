@@ -144,11 +144,7 @@ data_public/COVID19BE_CASES_MUNI.csv
 data_public/COVID19BE_VACC_MUNI_CUM.csv
 
 # Large geospatial files (optional, auto-downloaded)
-data_public/shapefiles/*.shp
-data_public/shapefiles/*.shx  
-data_public/shapefiles/*.dbf
-data_public/shapefiles/*.prj
-data_public/shapefiles/*.cpg
+data_public/shapefiles/
 
 # BUT KEEP essential small data files needed for deployment:
 # !data/population_by_NIS.xlsx (1.3MB - essential)
