@@ -143,22 +143,25 @@ def create_municipality_choropleth_app():
             # The shapefile has ~19,794 sectors but we only need ~581 municipalities
             logger.info("🔄 Aggregating statistical sectors into municipalities...")
             
-            # Find the municipality identifier column
+            # Find the municipality identifier column (based on actual shapefile structure)
             municipality_col = None
-            for col in ['CD_REFNIS', 'CD_REFNIS_MUN', 'NIS5', 'NISCODE']:
+            
+            # Check for the actual column names in Belgian statistical sectors shapefile
+            for col in ['CNIS5_2019', 'CD_REFNIS', 'NIS5', 'NISCODE']:
                 if col in gdf.columns:
                     municipality_col = col
                     logger.info(f"✅ Using municipality identifier: {col}")
                     break
             
             if municipality_col is None:
-                # Try to extract municipality code from sector code
-                if 'CD_REFNIS' in gdf.columns:
-                    # Belgian NIS codes: first 5 digits are municipality, last digit is sector
-                    gdf['MUNICIPALITY_CODE'] = gdf['CD_REFNIS'].astype(str).str[:5]
-                    municipality_col = 'MUNICIPALITY_CODE'
-                    logger.info("✅ Created municipality codes from sector codes")
-                else:
+                # Look for any column that contains municipality NIS codes
+                for col in gdf.columns:
+                    if 'CNIS5' in col or 'NIS5' in col or 'REFNIS' in col:
+                        municipality_col = col
+                        logger.info(f"✅ Found municipality identifier: {col}")
+                        break
+                
+                if municipality_col is None:
                     raise Exception("No municipality identifier found in shapefile")
             
             # Convert to WGS84 for web mapping BEFORE dissolving (more efficient)
@@ -168,9 +171,9 @@ def create_municipality_choropleth_app():
             # Dissolve statistical sectors into municipalities (MAJOR MEMORY SAVINGS)
             logger.info(f"🔄 Dissolving {len(gdf):,} sectors into municipalities...")
             
-            # Keep essential columns and dissolve by municipality
+            # Keep essential columns and dissolve by municipality (based on actual shapefile structure)
             essential_cols = [municipality_col]
-            for col in ['TX_DESCR_NL', 'TX_DESCR_FR', 'TX_ADM_DSTR_DESCR_NL']:
+            for col in ['T_MUN_NL', 'T_MUN_FR', 'TX_DESCR_NL', 'TX_DESCR_FR']:
                 if col in gdf.columns:
                     essential_cols.append(col)
             
@@ -196,12 +199,16 @@ def create_municipality_choropleth_app():
             merge_col = None
             data_merge_col = None
             
-            # Try different merge strategies
+            # Try different merge strategies (based on actual column names)
             merge_strategies = [
-                # Strategy 1: Direct municipality name matching
+                # Strategy 1: Direct municipality name matching (Dutch)
+                ('T_MUN_NL', 'TX_DESCR_NL_x'),
+                # Strategy 2: Direct municipality name matching (French)
+                ('T_MUN_FR', 'TX_DESCR_NL_x'),
+                # Strategy 3: Fallback to old column names if available
                 ('TX_DESCR_NL', 'TX_DESCR_NL_x'),
-                ('TX_DESCR_FR', 'TX_DESCR_NL_x'), 
-                # Strategy 2: NIS code matching
+                ('TX_DESCR_FR', 'TX_DESCR_NL_x'),
+                # Strategy 4: NIS code matching
                 (municipality_col, 'CD_REFNIS'),
                 (municipality_col, 'NIS5'),
             ]
