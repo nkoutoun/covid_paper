@@ -127,9 +127,10 @@ def load_and_process_shapefile():
         logger.info("🔄 Converting to WGS84...")
         belgium_municipalities = belgium_municipalities.to_crs('EPSG:4326')
     
-    # PERFORMANCE OPTIMIZATION: Simplify geometries
+    # PERFORMANCE OPTIMIZATION: Simplify geometries for faster rendering  
     logger.info("⚡ Optimizing geometries for faster rendering...")
     belgium_municipalities['geometry'] = belgium_municipalities['geometry'].simplify(tolerance=0.01, preserve_topology=True)
+    logger.info("✅ Geometries simplified!")
     
     return belgium_municipalities
 
@@ -138,6 +139,7 @@ def create_dashboard_data(covid_data, shapefile_data):
     logger.info("🔗 Merging COVID data with geographic data...")
     
     # Merge with ALL COVID data (not just one week)
+    logger.info(f"🔗 Merging with complete COVID dataset...")
     map_geo_data = shapefile_data.merge(covid_data, on='NIS5', how='left')
     
     # Calculate rates per 1000 if not already present
@@ -145,20 +147,39 @@ def create_dashboard_data(covid_data, shapefile_data):
         map_geo_data['cases_per_1000'] = (map_geo_data['CASES'] / map_geo_data['POPULATION'] * 1000).fillna(0)
     
     municipalities_with_data = (map_geo_data['CASES'] > 0).sum()
-    logger.info(f"✅ Successfully merged: {len(map_geo_data)} records")
+    logger.info(f"✅ Successfully merged: {len(map_geo_data)} records (municipalities × time periods)")
     logger.info(f"📊 Records with COVID data: {municipalities_with_data:,}")
     
     if 'date' in map_geo_data.columns:
         logger.info(f"📅 Date range: {map_geo_data['date'].min()} to {map_geo_data['date'].max()}")
     
-    # Essential columns for dashboard
+    # Show sample of merged data
+    logger.info(f"\n📋 Sample of merged data:")
+    sample_cols = ['NIS5', 'T_MUN_NL', 'date', 'CASES', 'SI', 'POPULATION']
+    available_cols = [col for col in sample_cols if col in map_geo_data.columns]
+    logger.info(f"Available sample columns: {available_cols}")
+    
+    # Check time period coverage
+    if 'date' in map_geo_data.columns:
+        unique_periods = map_geo_data['date'].nunique()
+        unique_municipalities = map_geo_data['NIS5'].nunique()
+        logger.info(f"\n📊 Data coverage:")
+        logger.info(f"  • {unique_municipalities} unique municipalities")
+        logger.info(f"  • {unique_periods} unique time periods")
+        logger.info(f"  • Expected total records: {unique_municipalities * unique_periods:,}")
+        logger.info(f"  • Actual records: {len(map_geo_data):,}")
+    
+    # Essential columns for dashboard (including province like in working version)
     essential_columns = [
-        'NIS5', 'T_MUN_NL', 'T_MUN_FR', 'date', 'CASES', 'SI', 'vacc_pct', 'POPULATION', 'geometry'
+        'NIS5', 'T_MUN_NL', 'T_MUN_FR', 'T_PROVI_NL', 'date', 'CASES', 'SI', 'vacc_pct', 'POPULATION', 'geometry'
     ]
     
     # Keep only columns that exist
     available_columns = [col for col in essential_columns if col in map_geo_data.columns]
     map_geo_data = map_geo_data[available_columns].copy()
+    
+    logger.info(f"📊 Using {len(map_geo_data):,} records")
+    logger.info(f"📋 Available columns: {list(map_geo_data.columns)}")
     
     # Fill missing values with 0 for main variables
     for col in ['CASES', 'SI', 'POPULATION', 'vacc_pct']:
@@ -267,17 +288,25 @@ def preprocess_and_cache_data(dashboard_data, time_column, unique_times):
         cached_geojson[0] = json.loads(dashboard_data_for_json.to_json())
     
     logger.info("✅ All time periods pre-processed and cached!")
+    
+    # Debug info like in working version
+    logger.info(f"🔍 Debug Info:")
+    logger.info(f"   - Shape: {dashboard_data.shape}")
+    if 'date' in dashboard_data.columns:
+        logger.info(f"   - Date column: {dashboard_data['date'].dtype}")
+        unique_dates = sorted([d for d in dashboard_data['date'].unique() if pd.notna(d)])
+        logger.info(f"   - Unique dates: {unique_dates}")
+        logger.info(f"   - Date range: {dashboard_data['date'].min()} to {dashboard_data['date'].max()}")
+    
     return cached_data, cached_geojson
 
 def create_optimized_map(selected_var, time_value, cached_data, cached_geojson, unique_times=None):
     """Create choropleth map using cached data - OPTIMIZED VERSION"""
     
-    logger.info(f"🔍 Creating map for variable: {selected_var}, time: {time_value}")
-    
-    # Use cached data instead of processing from scratch
+    # Use cached data instead of processing from scratch (FASTEST PATH)
     if time_value in cached_data:
         plot_data = cached_data[time_value]
-        geojson_dict = cached_geojson[time_value]
+        geojson_dict = cached_geojson[time_value]  # Pre-generated GeoJSON
         
         if unique_times:
             selected_time = unique_times[time_value]
@@ -321,10 +350,6 @@ def create_optimized_map(selected_var, time_value, cached_data, cached_geojson, 
         if hover_name_col is None:
             plot_data['municipality_name'] = 'Municipality ' + plot_data.index.astype(str)
             hover_name_col = 'municipality_name'
-        
-        logger.info(f"🔍 Using hover name column: {hover_name_col}")
-        logger.info(f"🔍 Variable range: {plot_data[selected_var].min():.2f} - {plot_data[selected_var].max():.2f}")
-        logger.info(f"🔍 Data points: {len(plot_data)}")
         
         # Create choropleth with pre-cached GeoJSON
         fig = px.choropleth_mapbox(
@@ -376,8 +401,6 @@ def create_optimized_map(selected_var, time_value, cached_data, cached_geojson, 
         )
         
         total_value = plot_data[selected_var].sum()
-        logger.info(f"✅ Choropleth map created successfully! Total value: {total_value:.2f}")
-        
         return fig, total_value, len(plot_data)
         
     except Exception as e:
@@ -416,7 +439,7 @@ def create_optimized_dashboard():
             {'label': '👥 Population', 'value': 'POPULATION'}
         ]
         
-        logger.info("📊 Available variables:", [opt['label'] for opt in variable_options])
+        logger.info(f"📊 Available variables: {[opt['label'] for opt in variable_options]}")
         
         # Create Dash App
         app = dash.Dash(__name__)
@@ -489,7 +512,6 @@ def create_optimized_dashboard():
              Input('time-slider', 'value')]
         )
         def update_map_and_stats(selected_variable, selected_time):
-            logger.info(f"🔄 Updating map for variable: {selected_variable}, time: {selected_time}")
             
             try:
                 # Create map using cached data
