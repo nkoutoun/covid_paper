@@ -94,268 +94,289 @@ def find_columns(data):
         'all_columns': cols
     }
 
-def create_lightweight_app():
-    """Create dashboard with minimal memory footprint."""
-    logger.info("🚀 Starting COVID-19 Belgium Dashboard (Memory Optimized)...")
+def create_municipality_choropleth_app():
+    """Create proper municipality-level choropleth dashboard using shapefile data."""
+    logger.info("🚀 Starting COVID-19 Belgium Dashboard with Municipality-Level Choropleth...")
     
     try:
         # Load lightweight data
         data = load_lightweight_data()
+        logger.info(f"📊 Loaded {len(data):,} records")
         
-        # Find the right columns dynamically
-        columns = find_columns(data)
-        logger.info(f"🔍 Found columns: {columns}")
+        # Import required packages
+        import geopandas as gpd
+        import json
         
-        # Create minimal dashboard
+        # Load shapefile data for municipality boundaries
+        try:
+            logger.info("📦 Loading shapefile data for municipality boundaries...")
+            shapefile_path = Path("data_public/shapefiles/sh_statbel_statistical_sectors_20190101.shp")
+            
+            if shapefile_path.exists():
+                # Load the shapefile
+                gdf = gpd.read_file(shapefile_path)
+                logger.info(f"✅ Loaded shapefile with {len(gdf):,} sectors")
+                
+                # Convert to WGS84 for web mapping
+                if gdf.crs != 'EPSG:4326':
+                    gdf = gdf.to_crs('EPSG:4326')
+                
+                # Simplify geometries for performance
+                gdf['geometry'] = gdf['geometry'].simplify(tolerance=0.001, preserve_topology=True)
+                
+                # Merge with COVID data based on municipality names
+                # Find common column for merging
+                merge_col = None
+                for col in ['TX_DESCR_NL', 'TX_DESCR_FR', 'CD_REFNIS']:
+                    if col in gdf.columns and 'TX_DESCR_NL_x' in data.columns:
+                        # Try to merge
+                        test_merge = data.merge(gdf[[col, 'geometry']], 
+                                              left_on='TX_DESCR_NL_x', 
+                                              right_on=col, 
+                                              how='inner')
+                        if len(test_merge) > 0:
+                            merge_col = col
+                            logger.info(f"✅ Found merge column: {col}")
+                            break
+                
+                if merge_col:
+                    # Merge data with geometry
+                    map_data = data.merge(gdf[[merge_col, 'geometry']], 
+                                        left_on='TX_DESCR_NL_x', 
+                                        right_on=merge_col, 
+                                        how='inner')
+                    
+                    # Convert to GeoDataFrame
+                    map_geo_data = gpd.GeoDataFrame(map_data, geometry='geometry')
+                    logger.info(f"✅ Created geospatial data with {len(map_geo_data):,} municipalities")
+                    
+                else:
+                    raise Exception("No suitable merge column found between data and shapefile")
+                    
+            else:
+                raise Exception(f"Shapefile not found: {shapefile_path}")
+                
+        except Exception as shapefile_error:
+            logger.error(f"❌ Shapefile loading failed: {shapefile_error}")
+            # Fall back to the simple scatter approach
+            return create_simple_scatter_app(data)
+        
+        # Create Dash app with municipality-level choropleth
         import dash
-        from dash import html, dcc
+        from dash import html, dcc, Input, Output
         import plotly.express as px
         import plotly.graph_objects as go
         
         app = dash.Dash(__name__)
         
-        # Create visualizations based on available data
-        figures = []
-        
-        # 1. CHOROPLETH HEATMAP - The main feature!
-        if columns['municipality'] and columns['cases']:
-            try:
-                # Create municipality-level summary for the map
-                muni_summary = data.groupby(columns['municipality']).agg({
-                    columns['cases']: 'sum',
-                    'POPULATION': 'first',
-                    'NIS5': 'first' if 'NIS5' in data.columns else None,
-                    'CD_REFNIS': 'first' if 'CD_REFNIS' in data.columns else None,
-                    'PROVINCE': 'first' if 'PROVINCE' in data.columns else None,
-                    'REGION': 'first' if 'REGION' in data.columns else None
-                }).reset_index()
-                
-                if 'POPULATION' in data.columns:
-                    muni_summary['cases_per_100k'] = (muni_summary[columns['cases']] / muni_summary['POPULATION'] * 100000).round(1)
-                
-                # Since we can't use detailed Belgian municipality boundaries without shapefiles,
-                # let's create a meaningful geographic visualization using available data
-                
-                # Option 1: Try province-level choropleth (more likely to work)
-                if 'PROVINCE' in muni_summary.columns:
-                    province_data = data.groupby('PROVINCE').agg({
-                        columns['cases']: 'sum',
-                        'POPULATION': 'sum'
-                    }).reset_index()
-                    province_data['cases_per_100k'] = (province_data[columns['cases']] / province_data['POPULATION'] * 100000).round(1)
-                    
-                    # Create a scatter plot on map using coordinates for Belgian provinces
-                    belgium_provinces = {
-                        'Antwerp': {'lat': 51.2, 'lon': 4.4},
-                        'East Flanders': {'lat': 51.0, 'lon': 3.7},
-                        'West Flanders': {'lat': 51.0, 'lon': 3.1},
-                        'Limburg': {'lat': 50.9, 'lon': 5.3},
-                        'Flemish Brabant': {'lat': 50.9, 'lon': 4.7},
-                        'Brussels': {'lat': 50.85, 'lon': 4.35},
-                        'Walloon Brabant': {'lat': 50.7, 'lon': 4.6},
-                        'Liège': {'lat': 50.6, 'lon': 5.6},
-                        'Luxembourg': {'lat': 50.0, 'lon': 5.5},
-                        'Namur': {'lat': 50.5, 'lon': 4.9},
-                        'Hainaut': {'lat': 50.4, 'lon': 4.0}
-                    }
-                    
-                    # Match provinces and add coordinates
-                    for idx, row in province_data.iterrows():
-                        province = row['PROVINCE']
-                        for prov_name, coords in belgium_provinces.items():
-                            if prov_name.lower() in province.lower() or province.lower() in prov_name.lower():
-                                province_data.loc[idx, 'lat'] = coords['lat']
-                                province_data.loc[idx, 'lon'] = coords['lon']
-                                break
-                    
-                    # Create scatter plot on map
-                    fig_map = px.scatter_mapbox(province_data,
-                                              lat='lat', 
-                                              lon='lon',
-                                              size=columns['cases'],
-                                              color='cases_per_100k',
-                                              hover_name='PROVINCE',
-                                              hover_data={columns['cases']: True, 'cases_per_100k': True},
-                                              color_continuous_scale="Reds",
-                                              size_max=50,
-                                              zoom=6.5,
-                                              center={'lat': 50.5, 'lon': 4.5},
-                                              title="🗺️ COVID-19 Cases by Belgian Province (October 2020)",
-                                              labels={'cases_per_100k': 'Cases per 100k', columns['cases']: 'Total Cases'})
-                    
-                    fig_map.update_layout(mapbox_style="open-street-map", height=600)
-                    figures.append(dcc.Graph(figure=fig_map))
-                
-                # Option 2: Fallback to municipality scatter plot
-                else:
-                    # Create a simple scatter geographic visualization
-                    # Use the top municipalities with estimated coordinates
-                    top_munis = muni_summary.nlargest(20, columns['cases']).copy()
-                    
-                    # Add approximate coordinates for major Belgian cities/municipalities
-                    belgium_cities = {
-                        'Antwerpen': {'lat': 51.2, 'lon': 4.4},
-                        'Brussels': {'lat': 50.85, 'lon': 4.35},
-                        'Bruxelles': {'lat': 50.85, 'lon': 4.35},
-                        'Gent': {'lat': 51.05, 'lon': 3.72},
-                        'Charleroi': {'lat': 50.41, 'lon': 4.44},
-                        'Liège': {'lat': 50.63, 'lon': 5.57},
-                        'Bruges': {'lat': 51.2, 'lon': 3.22},
-                        'Namur': {'lat': 50.47, 'lon': 4.87},
-                        'Leuven': {'lat': 50.88, 'lon': 4.70},
-                        'Mons': {'lat': 50.45, 'lon': 3.95}
-                    }
-                    
-                    # Add coordinates to municipalities
-                    for idx, row in top_munis.iterrows():
-                        municipality = row[columns['municipality']]
-                        found = False
-                        for city_name, coords in belgium_cities.items():
-                            if city_name.lower() in municipality.lower():
-                                top_munis.loc[idx, 'lat'] = coords['lat'] + (hash(municipality) % 100 - 50) / 1000  # Add small random offset
-                                top_munis.loc[idx, 'lon'] = coords['lon'] + (hash(municipality) % 100 - 50) / 1000
-                                found = True
-                                break
-                        
-                        if not found:
-                            # Random coordinates within Belgium
-                            top_munis.loc[idx, 'lat'] = 50.5 + (hash(municipality) % 200 - 100) / 100
-                            top_munis.loc[idx, 'lon'] = 4.5 + (hash(municipality) % 200 - 100) / 100
-                    
-                    fig_map = px.scatter_mapbox(top_munis,
-                                              lat='lat', 
-                                              lon='lon',
-                                              size=columns['cases'],
-                                              color='cases_per_100k' if 'cases_per_100k' in top_munis.columns else columns['cases'],
-                                              hover_name=columns['municipality'],
-                                              hover_data={columns['cases']: True},
-                                              color_continuous_scale="Reds",
-                                              size_max=30,
-                                              zoom=6.5,
-                                              center={'lat': 50.5, 'lon': 4.5},
-                                              title="🗺️ COVID-19 Cases - Top Belgian Municipalities (October 2020)",
-                                              labels={columns['cases']: 'Total Cases'})
-                    
-                    fig_map.update_layout(mapbox_style="open-street-map", height=600)
-                    figures.append(dcc.Graph(figure=fig_map))
-                    
-            except Exception as e:
-                logger.error(f"❌ Failed to create choropleth map: {e}")
-                # Create a simple province-level bar chart as fallback
-                if 'PROVINCE' in data.columns:
-                    province_summary = data.groupby('PROVINCE')[columns['cases']].sum().reset_index()
-                    fig_fallback = px.bar(province_summary,
-                                        x='PROVINCE',
-                                        y=columns['cases'],
-                                        title="🗺️ COVID-19 Cases by Belgian Province (Map Fallback)",
-                                        color=columns['cases'],
-                                        color_continuous_scale="Reds")
-                    fig_fallback.update_xaxes(tickangle=45)
-                    fig_fallback.update_layout(height=400)
-                    figures.append(dcc.Graph(figure=fig_fallback))
-        
-        # 2. Time series plot if we have date and cases
-        if columns['date'] and columns['cases']:
-            # Ensure date column is datetime
-            if not pd.api.types.is_datetime64_any_dtype(data[columns['date']]):
-                data[columns['date']] = pd.to_datetime(data[columns['date']])
-            
-            # Aggregate by date if needed
-            daily_data = data.groupby(columns['date'])[columns['cases']].sum().reset_index()
-            
-            fig_time = px.line(daily_data, 
-                          x=columns['date'], 
-                          y=columns['cases'],
-                          title='📈 COVID-19 Cases Over Time (October 2020 Sample)')
-            fig_time.update_layout(height=400)
-            figures.append(dcc.Graph(figure=fig_time))
-        
-        # 3. Cases by municipality bar chart
-        if columns['municipality'] and columns['cases']:
-            muni_data = data.groupby(columns['municipality'])[columns['cases']].sum().reset_index()
-            muni_data = muni_data.nlargest(15, columns['cases'])  # Top 15 municipalities
-            
-            fig_bar = px.bar(muni_data,
-                         x=columns['cases'], 
-                         y=columns['municipality'],
-                         orientation='h',
-                         title='🏆 Top 15 Municipalities by COVID-19 Cases',
-                         labels={columns['cases']: 'Total Cases', columns['municipality']: 'Municipality'})
-            fig_bar.update_layout(height=500, yaxis={'categoryorder':'total ascending'})
-            figures.append(dcc.Graph(figure=fig_bar))
-        
-        # Summary statistics
-        stats_content = [
-            html.H3("📊 Data Summary"),
-            html.P(f"📈 Total Records: {len(data):,}"),
-            html.P(f"💾 Memory Usage: {data.memory_usage(deep=True).sum() / 1024**2:.1f} MB"),
-            html.P(f"📅 Data Period: October 2020 (Sample Data)"),
-            html.P(f"🏛️ Municipalities: {data[columns['municipality']].nunique() if columns['municipality'] else 'N/A'}"),
+        # Variable options
+        variable_options = [
+            {'label': '🦠 COVID-19 Cases', 'value': 'CASES'},
+            {'label': '📊 Stringency Index', 'value': 'SI'},
+            {'label': '💉 Vaccination %', 'value': 'vacc_pct'},
+            {'label': '👥 Population', 'value': 'POPULATION'}
         ]
         
-        if columns['cases']:
-            total_cases = data[columns['cases']].sum()
-            stats_content.append(html.P(f"🦠 Total Cases: {total_cases:,}"))
+        # Time range setup
+        if 'date' in map_geo_data.columns:
+            unique_dates = sorted([d for d in map_geo_data['date'].unique() if pd.notna(d)])
+            time_range = list(range(len(unique_dates)))
+            time_marks = {}
+            
+            # Create smart time marks
+            for i in range(0, len(unique_dates), max(1, len(unique_dates)//8)):
+                date_val = unique_dates[i]
+                if hasattr(date_val, 'strftime'):
+                    time_marks[i] = date_val.strftime('%m-%d')
+                else:
+                    time_marks[i] = str(date_val)
+            
+            # Always include the last period
+            if len(unique_dates) > 1:
+                last_idx = len(unique_dates) - 1
+                date_val = unique_dates[-1]
+                if hasattr(date_val, 'strftime'):
+                    time_marks[last_idx] = date_val.strftime('%m-%d')
+                else:
+                    time_marks[last_idx] = str(date_val)
+        else:
+            time_range = [0]
+            time_marks = {0: 'All Data'}
         
-        # Add column info for debugging
-        stats_content.extend([
-            html.Hr(),
-            html.H4("🔧 Technical Info"),
-            html.P(f"Available Columns: {len(columns['all_columns'])}"),
-            html.Details([
-                html.Summary("Show All Columns"),
-                html.Pre(', '.join(columns['all_columns']))
-            ])
+        # Pre-process data for all time periods (memory optimization)
+        logger.info("⚡ Pre-processing municipality data for all time periods...")
+        cached_data = {}
+        cached_geojson = {}
+        
+        if len(unique_dates) > 1:
+            for i, date_val in enumerate(unique_dates[:5]):  # Limit to first 5 time periods for memory
+                logger.info(f"   Processing time period {i+1}/{min(5, len(unique_dates))}: {date_val}")
+                
+                # Filter data for this time period
+                time_data = map_geo_data[map_geo_data['date'] == date_val].copy().reset_index(drop=True)
+                
+                # Convert to regular DataFrame for JSON serialization
+                time_data_for_json = time_data.copy()
+                for col in time_data_for_json.columns:
+                    if time_data_for_json[col].dtype == 'datetime64[ns]':
+                        time_data_for_json[col] = time_data_for_json[col].astype(str)
+                
+                # Generate GeoJSON
+                geojson_dict = json.loads(time_data.to_json())
+                
+                # Cache the processed data
+                cached_data[i] = time_data
+                cached_geojson[i] = geojson_dict
+        else:
+            # Single time period
+            time_data_for_json = map_geo_data.copy()
+            for col in time_data_for_json.columns:
+                if time_data_for_json[col].dtype == 'datetime64[ns]':
+                    time_data_for_json[col] = time_data_for_json[col].astype(str)
+            
+            geojson_dict = json.loads(map_geo_data.to_json())
+            cached_data[0] = map_geo_data
+            cached_geojson[0] = geojson_dict
+        
+        logger.info("✅ Municipality data pre-processing complete!")
+        
+        # Create choropleth function
+        def create_municipality_map(selected_var, time_value):
+            """Create municipality-level choropleth map"""
+            
+            try:
+                # Use cached data
+                if time_value in cached_data:
+                    plot_data = cached_data[time_value]
+                    geojson_dict = cached_geojson[time_value]
+                else:
+                    plot_data = map_geo_data
+                    geojson_dict = json.loads(map_geo_data.to_json())
+                
+                # Create choropleth
+                fig = px.choropleth_mapbox(
+                    plot_data,
+                    geojson=geojson_dict,
+                    locations=plot_data.index,
+                    color=selected_var,
+                    color_continuous_scale="Reds",
+                    mapbox_style="carto-positron",
+                    zoom=6.5,
+                    center={"lat": 50.8503, "lon": 4.3517},
+                    opacity=0.7,
+                    hover_name='TX_DESCR_NL_x',
+                    hover_data={
+                        'CASES': ':,',
+                        'SI': ':.1f',
+                        'vacc_pct': ':.1f',
+                        'POPULATION': ':,'
+                    }
+                )
+                
+                fig.update_layout(
+                    title={
+                        'text': f"{selected_var} - Belgium Municipalities",
+                        'x': 0.5,
+                        'xanchor': 'center',
+                        'font': {'size': 18}
+                    },
+                    height=700,
+                    margin={"r":20,"t":80,"l":20,"b":20}
+                )
+                
+                return fig
+                
+            except Exception as e:
+                logger.error(f"❌ Municipality choropleth failed: {e}")
+                # Create fallback figure
+                fig = go.Figure()
+                fig.add_annotation(text=f"Map Error: {str(e)}", x=0.5, y=0.5, showarrow=False)
+                fig.update_layout(title="Error Creating Municipality Map", height=700)
+                return fig
+        
+        # App layout
+        app.layout = html.Div([
+            html.Div([
+                html.H1("🇧🇪 Belgium COVID-19 Municipality Dashboard", 
+                        style={'textAlign': 'center', 'color': '#2c3e50', 'marginBottom': 30}),
+                html.P("Interactive Municipality-Level Choropleth Map with Real Boundaries",
+                       style={'textAlign': 'center', 'color': '#7f8c8d', 'fontSize': 18})
+            ], style={'padding': '20px'}),
+            
+            html.Div([
+                html.Div([
+                    html.Label("📊 Select Variable:", style={'fontWeight': 'bold'}),
+                    dcc.Dropdown(
+                        id='variable-dropdown',
+                        options=variable_options,
+                        value='CASES',
+                        style={'marginBottom': 20}
+                    )
+                ], style={'width': '48%', 'display': 'inline-block'}),
+                
+                html.Div([
+                    html.Label("📅 Select Time Period:", style={'fontWeight': 'bold'}),
+                    dcc.Slider(
+                        id='time-slider',
+                        min=0,
+                        max=len(time_range)-1,
+                        value=0,
+                        marks=time_marks,
+                        step=1
+                    )
+                ], style={'width': '48%', 'float': 'right', 'display': 'inline-block'})
+            ], style={'width': '90%', 'margin': '0 auto', 'padding': '20px'}),
+            
+            html.Div([
+                dcc.Graph(id='municipality-map', style={'height': '700px'})
+            ], style={'padding': '0 20px'})
         ])
         
-        # Build layout
-        layout_content = [
-            html.H1("🇧🇪 COVID-19 Belgium Dashboard", 
-                   style={'textAlign': 'center', 'color': '#2c3e50', 'marginBottom': '10px'}),
-            html.P("Memory-optimized version • Render Free Tier • Sample Data",
-                  style={'textAlign': 'center', 'color': '#7f8c8d', 'fontSize': '14px'}),
-            html.Hr(),
-        ]
-        
-        # Add figures
-        layout_content.extend(figures)
-        
-        # Add statistics
-        layout_content.append(
-            html.Div(stats_content, 
-                    style={
-                        'margin': '20px auto',
-                        'padding': '20px',
-                        'backgroundColor': '#f8f9fa',
-                        'borderRadius': '8px',
-                        'maxWidth': '800px',
-                        'boxShadow': '0 2px 4px rgba(0,0,0,0.1)'
-                    })
+        @app.callback(
+            Output('municipality-map', 'figure'),
+            [Input('variable-dropdown', 'value'),
+             Input('time-slider', 'value')]
         )
+        def update_municipality_map(selected_variable, selected_time):
+            return create_municipality_map(selected_variable, selected_time)
         
-        app.layout = html.Div(layout_content, style={'fontFamily': 'Arial, sans-serif'})
-        
-        logger.info("✅ Lightweight dashboard created successfully!")
+        logger.info("✅ Municipality-level choropleth dashboard created successfully!")
         return app
         
     except Exception as e:
-        logger.error(f"❌ Failed to create lightweight dashboard: {e}")
-        logger.error(f"📋 Error details: {str(e)}")
-        
-        # Create emergency fallback app
-        import dash
-        from dash import html
-        
-        app = dash.Dash(__name__)
-        app.layout = html.Div([
-            html.H1("⚠️ Dashboard Error", style={'color': 'red', 'textAlign': 'center'}),
-            html.P("The dashboard encountered an error during startup.", style={'textAlign': 'center'}),
-            html.Pre(f"Error: {str(e)}", style={'backgroundColor': '#f0f0f0', 'padding': '20px'}),
-            html.P("Please check the logs for more details.", style={'textAlign': 'center', 'color': 'gray'})
-        ])
-        
-        logger.info("🚨 Emergency fallback dashboard created")
-        return app
+        logger.error(f"❌ Failed to create municipality dashboard: {e}")
+        # Fall back to simple approach
+        return create_simple_scatter_app(load_lightweight_data())
+
+def create_simple_scatter_app(data):
+    """Fallback simple scatter app if municipality choropleth fails"""
+    logger.info("🔄 Creating fallback scatter dashboard...")
+    
+    import dash
+    from dash import html, dcc
+    import plotly.express as px
+    
+    app = dash.Dash(__name__)
+    
+    # Simple time series visualization
+    if 'date' in data.columns and 'CASES' in data.columns:
+        daily_data = data.groupby('date')['CASES'].sum().reset_index()
+        fig = px.line(daily_data, x='date', y='CASES', 
+                     title='COVID-19 Cases Over Time')
+    else:
+        fig = px.bar(data.head(20), x='TX_DESCR_NL_x', y='CASES', 
+                    title='COVID-19 Cases by Municipality (Top 20)')
+    
+    app.layout = html.Div([
+        html.H1("COVID-19 Dashboard (Fallback)", style={'textAlign': 'center'}),
+        dcc.Graph(figure=fig)
+    ])
+    
+    return app
+
+def create_lightweight_app():
+    """Main entry point - tries municipality-level first, falls back if needed"""
+    return create_municipality_choropleth_app()
 
 # Create the app instance for Render
 app = create_lightweight_app()
