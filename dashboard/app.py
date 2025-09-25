@@ -7,8 +7,9 @@ It handles production configuration and starts the dashboard server.
 
 import os
 import logging
-from dashboard import main, create_and_launch_dashboard, run_data_pipeline
-from dashboard.config import DASHBOARD_CONFIG
+import main
+from main import create_and_launch_dashboard, run_data_pipeline
+from config import DASHBOARD_CONFIG
 
 # Configure logging for production
 logging.basicConfig(
@@ -33,7 +34,7 @@ def create_app():
     logger.info("🚀 Starting COVID-19 Belgium Dashboard on Render...")
     
     # Override config for production
-    from dashboard import config
+    import config
     config.DASHBOARD_CONFIG = get_production_config()
     
     try:
@@ -62,7 +63,7 @@ app = create_app()
 # For Render Web Service, we need the server to be accessible
 if __name__ == "__main__":
     # This will run when called directly (for testing)
-    from dashboard.visualization import launch_dashboard
+    from visualization import launch_dashboard
     launch_dashboard(app)
 else:
     # When imported by Render, just return the app
