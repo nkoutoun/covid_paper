@@ -1,0 +1,13 @@
+# Render.com configuration for COVID-19 Belgium Dashboard
+services:
+  - type: web
+    name: covid-belgium-dashboard
+    env: python
+    plan: free  # or starter/pro depending on your needs
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
+      - key: RENDER_DEPLOY
+        value: "true"
