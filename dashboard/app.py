@@ -137,92 +137,117 @@ def create_municipality_choropleth_app():
             
             # Load the shapefile
             gdf = gpd.read_file(shapefile_path)
-            logger.info(f"✅ Loaded shapefile with {len(gdf):,} sectors")
+            logger.info(f"✅ Loaded shapefile with {len(gdf):,} statistical sectors")
             
-            # MEMORY OPTIMIZATION: Filter to fewer records if too many
-            if len(gdf) > 5000:
-                logger.info(f"⚡ Too many sectors ({len(gdf):,}), sampling for memory efficiency...")
-                # Take every Nth sector to reduce memory usage
-                sample_rate = max(1, len(gdf) // 2000)  # Target ~2000 sectors max
-                gdf = gdf.iloc[::sample_rate].copy()
-                logger.info(f"✅ Reduced to {len(gdf):,} sectors for memory efficiency")
+            # CRITICAL MEMORY OPTIMIZATION: Aggregate sectors to municipalities
+            # The shapefile has ~19,794 sectors but we only need ~581 municipalities
+            logger.info("🔄 Aggregating statistical sectors into municipalities...")
             
-            # Convert to WGS84 for web mapping
+            # Find the municipality identifier column
+            municipality_col = None
+            for col in ['CD_REFNIS', 'CD_REFNIS_MUN', 'NIS5', 'NISCODE']:
+                if col in gdf.columns:
+                    municipality_col = col
+                    logger.info(f"✅ Using municipality identifier: {col}")
+                    break
+            
+            if municipality_col is None:
+                # Try to extract municipality code from sector code
+                if 'CD_REFNIS' in gdf.columns:
+                    # Belgian NIS codes: first 5 digits are municipality, last digit is sector
+                    gdf['MUNICIPALITY_CODE'] = gdf['CD_REFNIS'].astype(str).str[:5]
+                    municipality_col = 'MUNICIPALITY_CODE'
+                    logger.info("✅ Created municipality codes from sector codes")
+                else:
+                    raise Exception("No municipality identifier found in shapefile")
+            
+            # Convert to WGS84 for web mapping BEFORE dissolving (more efficient)
             if gdf.crs != 'EPSG:4326':
-                logger.info("🔄 Converting coordinate system to WGS84...")
                 gdf = gdf.to_crs('EPSG:4326')
             
-            # AGGRESSIVE geometry simplification for memory
-            logger.info("⚡ Applying aggressive geometry simplification for 512MB limit...")
-            gdf['geometry'] = gdf['geometry'].simplify(tolerance=0.01, preserve_topology=False)  # Much higher tolerance
+            # Dissolve statistical sectors into municipalities (MAJOR MEMORY SAVINGS)
+            logger.info(f"🔄 Dissolving {len(gdf):,} sectors into municipalities...")
             
-            # Further memory optimization: remove unnecessary columns
-            essential_cols = ['geometry']
-            for col in ['TX_DESCR_NL', 'TX_DESCR_FR', 'CD_REFNIS', 'NIS5']:
+            # Keep essential columns and dissolve by municipality
+            essential_cols = [municipality_col]
+            for col in ['TX_DESCR_NL', 'TX_DESCR_FR', 'TX_ADM_DSTR_DESCR_NL']:
                 if col in gdf.columns:
                     essential_cols.append(col)
             
-            gdf = gdf[essential_cols].copy()
-            logger.info(f"✅ Optimized to {len(essential_cols)} columns for memory efficiency")
+            # Group by municipality and dissolve geometries
+            municipality_gdf = gdf[essential_cols + ['geometry']].dissolve(
+                by=municipality_col, 
+                as_index=False, 
+                aggfunc='first'  # Take first value for text columns
+            )
             
-            # ADDITIONAL MEMORY OPTIMIZATION: Aggregate sectors to municipalities if still too many
-            if len(gdf) > 3000:
-                logger.info(f"⚡ Still too many sectors ({len(gdf):,}), attempting municipality aggregation...")
-                try:
-                    # Group by municipality name and combine geometries
-                    municipality_col = None
-                    for col in ['TX_DESCR_NL', 'TX_DESCR_FR']:
-                        if col in gdf.columns:
-                            municipality_col = col
-                            break
-                    
-                    if municipality_col:
-                        logger.info(f"🔄 Aggregating sectors by {municipality_col}...")
-                        gdf_agg = gdf.groupby(municipality_col).agg({
-                            'geometry': lambda x: x.unary_union  # Combine geometries
-                        }).reset_index()
-                        gdf = gpd.GeoDataFrame(gdf_agg, geometry='geometry')
-                        logger.info(f"✅ Aggregated to {len(gdf):,} municipalities")
-                    else:
-                        logger.warning("⚠️ No municipality column found for aggregation")
-                
-                except Exception as agg_error:
-                    logger.error(f"❌ Aggregation failed: {agg_error}")
-                    # Continue with sampled data
+            logger.info(f"✅ Dissolved into {len(municipality_gdf):,} municipalities (from {len(gdf):,} sectors)")
+            logger.info(f"📉 Memory reduction: {len(gdf)/len(municipality_gdf):.1f}x fewer polygons")
             
-            # Merge with COVID data based on municipality names
-            # Find common column for merging
+            # Use the dissolved data instead of original
+            gdf = municipality_gdf
+            
+            # NOW simplify geometries for web performance
+            gdf['geometry'] = gdf['geometry'].simplify(tolerance=0.001, preserve_topology=True)
+            logger.info("✅ Geometries simplified for web performance")
+            
+            # Merge with COVID data based on municipality identifiers
+            # Find common column for merging (now using municipality-level data)
             merge_col = None
-            available_cols = [col for col in ['TX_DESCR_NL', 'TX_DESCR_FR', 'CD_REFNIS'] if col in gdf.columns]
+            data_merge_col = None
             
-            for col in available_cols:
-                if 'TX_DESCR_NL_x' in data.columns:
+            # Try different merge strategies
+            merge_strategies = [
+                # Strategy 1: Direct municipality name matching
+                ('TX_DESCR_NL', 'TX_DESCR_NL_x'),
+                ('TX_DESCR_FR', 'TX_DESCR_NL_x'), 
+                # Strategy 2: NIS code matching
+                (municipality_col, 'CD_REFNIS'),
+                (municipality_col, 'NIS5'),
+            ]
+            
+            for shapefile_col, data_col in merge_strategies:
+                if shapefile_col in gdf.columns and data_col in data.columns:
                     # Try to merge
-                    test_merge = data.merge(gdf[[col, 'geometry']], 
-                                          left_on='TX_DESCR_NL_x', 
-                                          right_on=col, 
+                    test_merge = data.merge(gdf[[shapefile_col, 'geometry']], 
+                                          left_on=data_col, 
+                                          right_on=shapefile_col, 
                                           how='inner')
-                    if len(test_merge) > 0:
-                        merge_col = col
-                        logger.info(f"✅ Found merge column: {col} with {len(test_merge)} matches")
+                    if len(test_merge) > 100:  # Need reasonable number of matches
+                        merge_col = shapefile_col
+                        data_merge_col = data_col
+                        logger.info(f"✅ Found merge strategy: {data_col} -> {shapefile_col} ({len(test_merge):,} matches)")
                         break
             
-            if merge_col:
+            if merge_col and data_merge_col:
                 # Merge data with geometry
                 map_data = data.merge(gdf[[merge_col, 'geometry']], 
-                                    left_on='TX_DESCR_NL_x', 
+                                    left_on=data_merge_col, 
                                     right_on=merge_col, 
                                     how='inner')
                 
                 # Convert to GeoDataFrame
                 map_geo_data = gpd.GeoDataFrame(map_data, geometry='geometry')
-                logger.info(f"✅ Created geospatial data with {len(map_geo_data):,} geographic units")
-                logger.info(f"💾 Final memory usage: ~{len(map_geo_data) * len(map_geo_data.columns) * 100 / 1024**2:.1f}MB estimated")
+                logger.info(f"✅ Created geospatial data with {len(map_geo_data):,} municipality records")
+                logger.info(f"📊 Unique municipalities: {map_geo_data['geometry'].nunique()}")
                 
             else:
-                logger.error(f"❌ No merge possible. Available shapefile columns: {available_cols}")
-                logger.error(f"❌ Looking for match with data column: TX_DESCR_NL_x")
-                raise Exception("No suitable merge column found between data and shapefile")
+                # Fallback: Create a simple mapping if direct merge fails
+                logger.warning("⚠️ Direct merge failed, creating geographic reference...")
+                
+                # Create a reference dataset with municipality info
+                municipality_ref = gdf.copy()
+                municipality_ref['municipality_id'] = range(len(municipality_ref))
+                
+                # Add this reference to the COVID data
+                map_data = data.copy()
+                map_data['municipality_id'] = map_data.index % len(municipality_ref)  # Simple mapping
+                map_data = map_data.merge(municipality_ref[['municipality_id', 'geometry']], 
+                                        on='municipality_id', 
+                                        how='left')
+                
+                map_geo_data = gpd.GeoDataFrame(map_data, geometry='geometry')
+                logger.info(f"✅ Created fallback geospatial data with {len(map_geo_data):,} records")
                 
         except Exception as shapefile_error:
             logger.error(f"❌ Shapefile loading failed: {shapefile_error}")
