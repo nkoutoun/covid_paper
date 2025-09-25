@@ -110,89 +110,115 @@ def create_municipality_choropleth_app():
         # Load shapefile data for municipality boundaries
         try:
             logger.info("📦 Loading shapefile data for municipality boundaries...")
-            shapefile_path = Path("data_public/shapefiles/sh_statbel_statistical_sectors_20190101.shp")
             
-            # If shapefile doesn't exist, try to download it automatically
-            if not shapefile_path.exists():
-                logger.info("📦 Shapefile not found, attempting automatic download...")
-                try:
-                    # Import the download function
-                    from data_processing import download_and_extract_shapefile
-                    
-                    # Attempt download
-                    download_success = download_and_extract_shapefile()
-                    
-                    if not download_success or not shapefile_path.exists():
-                        logger.error("❌ Automatic shapefile download failed")
-                        raise Exception("Shapefile download failed")
-                    else:
-                        logger.info("✅ Shapefile downloaded successfully!")
+            # PRIORITY 1: Try to load pre-aggregated municipality shapefile (much faster and memory-efficient)
+            municipality_shapefile_path = Path("data_public/municipalities/belgium_municipalities_2019.shp")
+            
+            if municipality_shapefile_path.exists():
+                logger.info("✅ Found pre-aggregated municipality shapefile - using direct load!")
+                
+                # Load the pre-aggregated municipalities directly
+                gdf = gpd.read_file(municipality_shapefile_path)
+                logger.info(f"✅ Loaded {len(gdf):,} municipalities directly (no aggregation needed)")
+                logger.info(f"📊 Memory usage: {gdf.memory_usage(deep=True).sum() / 1024**2:.1f} MB")
+                
+                # Ensure we're in WGS84 (should already be from pre-processing)
+                if gdf.crs != 'EPSG:4326':
+                    gdf = gdf.to_crs('EPSG:4326')
+                
+                # Skip all the aggregation steps - go directly to merge
+                logger.info("⚡ Skipping aggregation - using pre-processed municipalities")
+                
+            else:
+                logger.info("⚠️ Pre-aggregated municipality shapefile not found, falling back to statistical sectors...")
+                
+                # FALLBACK: Load and process statistical sectors (memory intensive)
+                shapefile_path = Path("data_public/shapefiles/sh_statbel_statistical_sectors_20190101.shp")
+                
+                # If shapefile doesn't exist, try to download it automatically
+                if not shapefile_path.exists():
+                    logger.info("📦 Shapefile not found, attempting automatic download...")
+                    try:
+                        # Import the download function
+                        from data_processing import download_and_extract_shapefile
                         
-                except ImportError as e:
-                    logger.error(f"❌ Could not import download function: {e}")
-                    raise Exception("Shapefile download function not available")
-                except Exception as e:
-                    logger.error(f"❌ Shapefile download failed: {e}")
-                    raise Exception(f"Failed to download shapefile: {e}")
-            
-            # Load the shapefile
-            gdf = gpd.read_file(shapefile_path)
-            logger.info(f"✅ Loaded shapefile with {len(gdf):,} statistical sectors")
-            
-            # CRITICAL MEMORY OPTIMIZATION: Aggregate sectors to municipalities
-            # The shapefile has ~19,794 sectors but we only need ~581 municipalities
-            logger.info("🔄 Aggregating statistical sectors into municipalities...")
-            
-            # Find the municipality identifier column (based on actual shapefile structure)
-            municipality_col = None
-            
-            # Check for the actual column names in Belgian statistical sectors shapefile
-            for col in ['CNIS5_2019', 'CD_REFNIS', 'NIS5', 'NISCODE']:
-                if col in gdf.columns:
-                    municipality_col = col
-                    logger.info(f"✅ Using municipality identifier: {col}")
-                    break
-            
-            if municipality_col is None:
-                # Look for any column that contains municipality NIS codes
-                for col in gdf.columns:
-                    if 'CNIS5' in col or 'NIS5' in col or 'REFNIS' in col:
+                        # Attempt download
+                        download_success = download_and_extract_shapefile()
+                        
+                        if not download_success or not shapefile_path.exists():
+                            logger.error("❌ Automatic shapefile download failed")
+                            raise Exception("Shapefile download failed")
+                        else:
+                            logger.info("✅ Shapefile downloaded successfully!")
+                            
+                    except ImportError as e:
+                        logger.error(f"❌ Could not import download function: {e}")
+                        raise Exception("Shapefile download function not available")
+                    except Exception as e:
+                        logger.error(f"❌ Shapefile download failed: {e}")
+                        raise Exception(f"Failed to download shapefile: {e}")
+                
+                # Continue with statistical sectors processing (fallback)
+                # Load the shapefile
+                gdf = gpd.read_file(shapefile_path)
+                logger.info(f"✅ Loaded shapefile with {len(gdf):,} statistical sectors")
+                
+                # CRITICAL MEMORY OPTIMIZATION: Aggregate sectors to municipalities
+                # The shapefile has ~19,794 sectors but we only need ~581 municipalities
+                logger.info("🔄 Aggregating statistical sectors into municipalities...")
+                
+                # Find the municipality identifier column (based on actual shapefile structure)
+                municipality_col = None
+                
+                # Check for the actual column names in Belgian statistical sectors shapefile
+                for col in ['CNIS5_2019', 'CD_REFNIS', 'NIS5', 'NISCODE']:
+                    if col in gdf.columns:
                         municipality_col = col
-                        logger.info(f"✅ Found municipality identifier: {col}")
+                        logger.info(f"✅ Using municipality identifier: {col}")
                         break
                 
                 if municipality_col is None:
-                    raise Exception("No municipality identifier found in shapefile")
+                    # Look for any column that contains municipality NIS codes
+                    for col in gdf.columns:
+                        if 'CNIS5' in col or 'NIS5' in col or 'REFNIS' in col:
+                            municipality_col = col
+                            logger.info(f"✅ Found municipality identifier: {col}")
+                            break
+                    
+                    if municipality_col is None:
+                        raise Exception("No municipality identifier found in shapefile")
+                
+                # Convert to WGS84 for web mapping BEFORE dissolving (more efficient)
+                if gdf.crs != 'EPSG:4326':
+                    gdf = gdf.to_crs('EPSG:4326')
+                
+                # Dissolve statistical sectors into municipalities (MAJOR MEMORY SAVINGS)
+                logger.info(f"🔄 Dissolving {len(gdf):,} sectors into municipalities...")
+                
+                # Keep essential columns and dissolve by municipality (based on actual shapefile structure)
+                essential_cols = [municipality_col]
+                for col in ['T_MUN_NL', 'T_MUN_FR', 'TX_DESCR_NL', 'TX_DESCR_FR']:
+                    if col in gdf.columns:
+                        essential_cols.append(col)
+                
+                # Group by municipality and dissolve geometries
+                municipality_gdf = gdf[essential_cols + ['geometry']].dissolve(
+                    by=municipality_col, 
+                    as_index=False, 
+                    aggfunc='first'  # Take first value for text columns
+                )
+                
+                logger.info(f"✅ Dissolved into {len(municipality_gdf):,} municipalities (from {len(gdf):,} sectors)")
+                logger.info(f"📉 Memory reduction: {len(gdf)/len(municipality_gdf):.1f}x fewer polygons")
+                
+                # Use the dissolved data instead of original
+                gdf = municipality_gdf
+                
+                # NOW simplify geometries for web performance
+                gdf['geometry'] = gdf['geometry'].simplify(tolerance=0.001, preserve_topology=True)
+                logger.info("✅ Geometries simplified for web performance")
             
-            # Convert to WGS84 for web mapping BEFORE dissolving (more efficient)
-            if gdf.crs != 'EPSG:4326':
-                gdf = gdf.to_crs('EPSG:4326')
-            
-            # Dissolve statistical sectors into municipalities (MAJOR MEMORY SAVINGS)
-            logger.info(f"🔄 Dissolving {len(gdf):,} sectors into municipalities...")
-            
-            # Keep essential columns and dissolve by municipality (based on actual shapefile structure)
-            essential_cols = [municipality_col]
-            for col in ['T_MUN_NL', 'T_MUN_FR', 'TX_DESCR_NL', 'TX_DESCR_FR']:
-                if col in gdf.columns:
-                    essential_cols.append(col)
-            
-            # Group by municipality and dissolve geometries
-            municipality_gdf = gdf[essential_cols + ['geometry']].dissolve(
-                by=municipality_col, 
-                as_index=False, 
-                aggfunc='first'  # Take first value for text columns
-            )
-            
-            logger.info(f"✅ Dissolved into {len(municipality_gdf):,} municipalities (from {len(gdf):,} sectors)")
-            logger.info(f"📉 Memory reduction: {len(gdf)/len(municipality_gdf):.1f}x fewer polygons")
-            
-            # Use the dissolved data instead of original
-            gdf = municipality_gdf
-            
-            # NOW simplify geometries for web performance
-            gdf['geometry'] = gdf['geometry'].simplify(tolerance=0.001, preserve_topology=True)
-            logger.info("✅ Geometries simplified for web performance")
+            # At this point, gdf contains municipality-level data (either pre-aggregated or processed from sectors)
             
             # Merge with COVID data based on municipality identifiers
             # Find common column for merging (now using municipality-level data)
