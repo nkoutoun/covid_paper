@@ -5,7 +5,7 @@ services:
     env: python
     plan: free  # or starter/pro depending on your needs
     buildCommand: pip install -r requirements.txt
-    startCommand: python app_memory_optimized.py
+    startCommand: python app.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.11
