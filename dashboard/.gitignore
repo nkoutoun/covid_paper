@@ -139,9 +139,7 @@ dmypy.json
 .DS_Store
 Thumbs.db
 
-# Dashboard-specific large files (auto-downloaded, don't commit)
-data/intermediate_data_covid_gri.csv
-# data/demo_data_october_2020.csv  # Allow this small file for deployment
+# Dashboard-specific large files
 data_public/COVID19BE_CASES_MUNI.csv
 data_public/COVID19BE_VACC_MUNI_CUM.csv
 
