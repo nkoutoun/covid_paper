@@ -22,7 +22,7 @@ from .utils import (
     prepare_panel_data
 )
 
-__version__ = "1.0.0"
+__version__ = "0.1.0"
 __author__ = "Converted from Stata implementation by Nikolaos Koutounidis"
 __email__ = "nikolaos.koutounidis@ugent.be"
 

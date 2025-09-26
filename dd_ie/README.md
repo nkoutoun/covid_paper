@@ -22,7 +22,16 @@ Standard fixed effects interactions (`X×Z`) may be biased when both variables v
 ## Installation
 
 ```bash
-pip install pandas numpy statsmodels linearmodels matplotlib seaborn scipy
+# Install from source (development)
+pip install git+https://github.com/nkoutoun/covid_paper.git#subdirectory=dd_ie
+
+# Or clone and install locally
+git clone https://github.com/nkoutoun/covid_paper.git
+cd covid_paper/dd_ie
+pip install .
+
+# For development with optional dependencies
+pip install .[dev,viz]
 ```
 
 ## Quick Start
@@ -90,6 +99,12 @@ df_processed = create_double_demeaned_interaction(df, 'x_var', 'z_var', 'unit_id
 standard_results, dd_results, comparison = estimate_fe_models(df_processed, 'y_var', 'x_var', 'z_var', ['control1'])
 hausman_results = perform_hausman_test(standard_results, dd_results, 'x_var', 'z_var')
 ```
+
+## Examples and Testing
+
+- **Example Script**: See `examples/basic_example.py` for a complete working example with synthetic data
+- **Test Suite**: Run tests with `pytest tests/` to verify installation
+- **Documentation**: All functions include comprehensive docstrings
 
 ## Common Issues
 

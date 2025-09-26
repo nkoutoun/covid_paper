@@ -1,4 +1,4 @@
-# 🇧🇪 Belgium COVID-19 Interactive Dashboard
+# Belgium COVID-19 Interactive Dashboard
 
 An interactive web dashboard for exploring COVID-19 data across Belgian municipalities with temporal analysis and geospatial visualization.
 
@@ -24,12 +24,12 @@ python app.py
 ```
 
 ### Live Demo
-Visit the deployed dashboard: [Your Render URL]
+Visit the deployed dashboard: https://covid-belgium-dashboard.onrender.com
 
 ## 📊 Data Sources
 
-- **COVID-19 Cases**: Sciensano (Belgian Institute for Health)
-- **Vaccination Data**: Belgian Health Ministry  
+- **COVID-19 Cases**: Sciensano (Belgian Institute for Health) - Only publicly available data is shown. When daily cases are <5 for a municipality, we set them to be equal to 1 for data privacy reasons.
+- **Vaccination Data**: Sciensano (Belgian Institute for Health)  
 - **Geographic Boundaries**: StatBel (Belgian Statistics Office)
 - **Government Response**: Oxford COVID-19 Government Response Tracker
 - **Coverage**: 91K+ records across 581 municipalities (2019-2022)
@@ -53,7 +53,6 @@ dashboard/
 - **Geospatial**: GeoPandas with optimized municipality boundaries
 - **Performance**: Pre-cached data and geometry simplification
 - **Memory**: <100MB total footprint for cloud deployment
-- **Data Processing**: Statistical sectors aggregated to municipalities (34x reduction)
 
 ## 🌍 Deployment
 
@@ -73,6 +72,6 @@ The dashboard is optimized for **Render.com** deployment:
 
 ## 🤝 Contributing
 
-This dashboard was created for COVID-19 research analysis. For questions or contributions, please contact the research team.
+This dashboard was created for COVID-19 research analysis. For questions or contributions, please contact Nikolaos Koutounidis.
 
 ---

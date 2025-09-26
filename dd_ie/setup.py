@@ -9,12 +9,12 @@ long_description = (this_directory / "README.md").read_text(encoding='utf-8')
 
 setup(
     name="dd_ie",
-    version="1.0.0",
-    author="DD_IE Contributors",
+    version="0.1.0",
+    author="Nikolaos Koutounidis",
     description="Double demeaning technique for unbiased estimation of interactions in fixed effects models",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/[username]/[repository]",
+    url="https://github.com/nkoutoun/covid_paper",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 4 - Beta",
@@ -42,8 +42,8 @@ setup(
     },
     keywords="econometrics, fixed effects, interactions, panel data, double demeaning",
     project_urls={
-        "Bug Reports": "https://github.com/[username]/[repository]/issues",
-        "Source": "https://github.com/[username]/[repository]",
-        "Documentation": "https://github.com/[username]/[repository]#readme",
+        "Bug Reports": "https://github.com/nkoutoun/covid_paper/issues",
+        "Source": "https://github.com/nkoutoun/covid_paper/tree/main/dd_ie",
+        "Documentation": "https://github.com/nkoutoun/covid_paper/tree/main/dd_ie#readme",
     },
 )
