@@ -1,6 +1,6 @@
-# COVID-19 Policy Impact Research
+# COVID-19 Impact Research
 
-Research project analyzing the heterogeneous impact of COVID-19 policies on consumption using Belgian municipal-level data and bank transaction records.
+Research project analyzing the heterogeneous impact of COVID-19 on consumption using Belgian municipal-level data and bank transaction records.
 
 ## 📄 Publication
 
