@@ -138,3 +138,12 @@ dmypy.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Data files (third-party, not distributed)
+*.dta
+*.sav
+*.xls
+*.xlsx
+
+# Claude Code
+.claude/

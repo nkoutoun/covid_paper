@@ -1,136 +1,193 @@
-"""
-Tests for core functionality of dd_ie package.
-"""
+"""Tests for core functionality of dd_ie package."""
 
-import pandas as pd
+from __future__ import annotations
+
 import numpy as np
+import pandas as pd
 import pytest
+
 from dd_ie import DoubleDemeanAnalysis, create_double_demeaned_interaction
+from dd_ie._types import ComparisonResult
 
 
 class TestDoubleDemeanAnalysis:
-    """Test cases for DoubleDemeanAnalysis class."""
-    
-    def test_init_basic(self):
-        """Test basic initialization."""
-        # Create simple test data
-        np.random.seed(42)
-        n_units, n_time = 10, 5
-        data = []
-        
-        for unit in range(1, n_units + 1):
-            for time in range(1, n_time + 1):
-                data.append({
-                    'unit_id': unit,
-                    'time_id': time,
-                    'y': np.random.normal(0, 1),
-                    'x': np.random.normal(0, 1),
-                    'z': np.random.normal(0, 1),
-                    'control1': np.random.normal(0, 1)
-                })
-        
-        df = pd.DataFrame(data)
-        
-        # Initialize analysis
+    """Tests for the DoubleDemeanAnalysis class."""
+
+    def test_init_basic(self, balanced_panel: pd.DataFrame) -> None:
         analysis = DoubleDemeanAnalysis(
-            data=df,
-            unit_var='unit_id',
-            time_var='time_id',
-            y_var='y',
-            x_var='x',
-            z_var='z',
-            w_vars=['control1']
+            data=balanced_panel,
+            unit_var="unit_id",
+            time_var="time_id",
+            y_var="y",
+            x_var="x",
+            z_var="z",
+            w_vars=["control1"],
         )
-        
-        assert analysis.unit_var == 'unit_id'
-        assert analysis.time_var == 'time_id'
-        assert analysis.y_var == 'y'
-        assert analysis.x_var == 'x'
-        assert analysis.z_var == 'z'
-        assert analysis.w_vars == ['control1']
-        assert len(analysis.data) == n_units * n_time
-    
-    def test_missing_variables(self):
-        """Test error handling for missing variables."""
-        # Create data missing required variables
-        df = pd.DataFrame({
-            'unit_id': [1, 1, 2, 2],
-            'time_id': [1, 2, 1, 2],
-            'y': [1, 2, 3, 4]
-        })
-        
-        with pytest.raises(KeyError):
+        assert analysis.unit_var == "unit_id"
+        assert analysis.y_var == "y"
+        assert analysis.x_var == "x"
+        assert analysis.z_var == "z"
+        assert analysis.w_vars == ["control1"]
+        assert len(analysis.data) == 160
+
+    def test_missing_variables_raises_valueerror(self) -> None:
+        df = pd.DataFrame(
+            {
+                "unit_id": [1, 1, 2, 2],
+                "time_id": [1, 2, 1, 2],
+                "y": [1, 2, 3, 4],
+            }
+        )
+        with pytest.raises(ValueError, match="Variables not found in data"):
             DoubleDemeanAnalysis(
                 data=df,
-                unit_var='unit_id',
-                time_var='time_id',
-                y_var='y',
-                x_var='missing_x',  # This variable doesn't exist
-                z_var='missing_z',  # This variable doesn't exist
+                unit_var="unit_id",
+                time_var="time_id",
+                y_var="y",
+                x_var="missing_x",
+                z_var="missing_z",
             )
+
+    def test_repr(self, balanced_panel: pd.DataFrame) -> None:
+        analysis = DoubleDemeanAnalysis(
+            data=balanced_panel,
+            unit_var="unit_id",
+            time_var="time_id",
+            y_var="y",
+            x_var="x",
+            z_var="z",
+        )
+        r = repr(analysis)
+        assert "DoubleDemeanAnalysis" in r
+        assert "y='y'" in r
+        assert "n_obs=160" in r
+
+    def test_init_without_controls(self, balanced_panel: pd.DataFrame) -> None:
+        analysis = DoubleDemeanAnalysis(
+            data=balanced_panel,
+            unit_var="unit_id",
+            time_var="time_id",
+            y_var="y",
+            x_var="x",
+            z_var="z",
+        )
+        assert analysis.w_vars == []
 
 
 class TestCreateDoubleDemeanedInteraction:
-    """Test cases for create_double_demeaned_interaction function."""
-    
-    def test_basic_functionality(self):
-        """Test basic double demeaning functionality."""
-        # Create simple test data
-        data = pd.DataFrame({
-            'unit_id': [1, 1, 1, 2, 2, 2],
-            'time_id': [1, 2, 3, 1, 2, 3],
-            'x': [1, 2, 3, 4, 5, 6],
-            'z': [2, 4, 6, 1, 3, 5]
-        })
-        
-        # Set index
-        data = data.set_index(['unit_id', 'time_id'])
-        
-        # Apply double demeaning
-        result = create_double_demeaned_interaction(
-            data, 'x', 'z', 'unit_id', verbose=False
-        )
-        
-        # Check that required columns were created
-        expected_cols = ['x', 'z', 'mean_x', 'mean_z', 'dm_x', 'dm_z', 
-                        'int_x_z', 'dd_int_x_z']
+    """Tests for create_double_demeaned_interaction."""
+
+    def test_basic_functionality(self, simple_panel: pd.DataFrame) -> None:
+        data = simple_panel.set_index(["unit_id", "time_id"])
+        result = create_double_demeaned_interaction(data, "x", "z", "unit_id", verbose=False)
+
+        expected_cols = ["x", "z", "mean_x", "mean_z", "dm_x", "dm_z", "int_x_z", "dd_int_x_z"]
         for col in expected_cols:
             assert col in result.columns, f"Column {col} not found"
-        
-        # Check that demeaned variables have zero mean within units
+
+        # Check demeaned variables have zero mean within units
         for unit in result.index.get_level_values(0).unique():
             unit_data = result.loc[unit]
-            assert abs(unit_data['dm_x'].mean()) < 1e-10
-            assert abs(unit_data['dm_z'].mean()) < 1e-10
-    
-    def test_interaction_calculation(self):
-        """Test that interactions are calculated correctly."""
-        # Create simple test data
-        data = pd.DataFrame({
-            'unit_id': [1, 1, 2, 2],
-            'time_id': [1, 2, 1, 2],
-            'x': [1, 3, 2, 4],  # Unit 1 mean = 2, Unit 2 mean = 3
-            'z': [2, 4, 1, 3]   # Unit 1 mean = 3, Unit 2 mean = 2
-        })
-        
-        data = data.set_index(['unit_id', 'time_id'])
-        
-        result = create_double_demeaned_interaction(
-            data, 'x', 'z', 'unit_id', verbose=False
+            assert abs(unit_data["dm_x"].mean()) < 1e-10
+            assert abs(unit_data["dm_z"].mean()) < 1e-10
+
+    def test_interaction_calculation(self) -> None:
+        data = pd.DataFrame(
+            {
+                "unit_id": [1, 1, 2, 2],
+                "time_id": [1, 2, 1, 2],
+                "x": [1.0, 3.0, 2.0, 4.0],  # Unit 1 mean = 2, Unit 2 mean = 3
+                "z": [2.0, 4.0, 1.0, 3.0],  # Unit 1 mean = 3, Unit 2 mean = 2
+            }
         )
-        
-        # Manually verify calculations for unit 1
-        unit1_data = result.loc[1]
-        
-        # x values: [1, 3], mean = 2, demeaned = [-1, 1]
-        # z values: [2, 4], mean = 3, demeaned = [-1, 1]
-        # dd interaction should be: [-1 * -1, 1 * 1] = [1, 1]
-        
-        expected_dd_interaction = np.array([1.0, 1.0])
-        actual_dd_interaction = unit1_data['dd_int_x_z'].values
-        
-        np.testing.assert_array_almost_equal(actual_dd_interaction, expected_dd_interaction)
+        data = data.set_index(["unit_id", "time_id"])
+        result = create_double_demeaned_interaction(data, "x", "z", "unit_id", verbose=False)
+
+        # Unit 1: dm_x = [-1, 1], dm_z = [-1, 1], dd_int = [1, 1]
+        unit1 = result.loc[1]
+        np.testing.assert_array_almost_equal(unit1["dd_int_x_z"].values, [1.0, 1.0])
+
+        # Unit 2: dm_x = [-1, 1], dm_z = [-1, 1], dd_int = [1, 1]
+        unit2 = result.loc[2]
+        np.testing.assert_array_almost_equal(unit2["dd_int_x_z"].values, [1.0, 1.0])
+
+    def test_standard_interaction_is_product(self, simple_panel: pd.DataFrame) -> None:
+        data = simple_panel.set_index(["unit_id", "time_id"])
+        result = create_double_demeaned_interaction(data, "x", "z", "unit_id", verbose=False)
+
+        expected = data["x"] * data["z"]
+        pd.testing.assert_series_equal(result["int_x_z"], expected, check_names=False)
 
 
-if __name__ == '__main__':
-    pytest.main([__file__])
+class TestEstimateFEModels:
+    """Tests for estimate_fe_models (via the full pipeline)."""
+
+    def test_returns_comparison_result(self, balanced_panel: pd.DataFrame) -> None:
+        analysis = DoubleDemeanAnalysis(
+            data=balanced_panel,
+            unit_var="unit_id",
+            time_var="time_id",
+            y_var="y",
+            x_var="x",
+            z_var="z",
+            w_vars=["control1"],
+        )
+        result = analysis.run_analysis(verbose=False, run_hausman=False)
+        assert isinstance(result.comparison, ComparisonResult)
+        assert isinstance(result.comparison.table, pd.DataFrame)
+        assert len(result.comparison.table) > 0
+
+    def test_comparison_table_includes_interaction_row(
+        self, balanced_panel: pd.DataFrame
+    ) -> None:
+        """Regression test: the interaction row must appear in the comparison."""
+        analysis = DoubleDemeanAnalysis(
+            data=balanced_panel,
+            unit_var="unit_id",
+            time_var="time_id",
+            y_var="y",
+            x_var="x",
+            z_var="z",
+        )
+        result = analysis.run_analysis(verbose=False, run_hausman=False)
+
+        variables = result.comparison.table["Variable"].tolist()
+        assert "int_x_z" in variables, (
+            f"Interaction row missing from comparison table. Variables: {variables}"
+        )
+
+
+class TestPerformHausmanTest:
+    """Tests for perform_hausman_test (via the full pipeline)."""
+
+    def test_hausman_returns_result(self, balanced_panel: pd.DataFrame) -> None:
+        from dd_ie._types import HausmanResult
+
+        analysis = DoubleDemeanAnalysis(
+            data=balanced_panel,
+            unit_var="unit_id",
+            time_var="time_id",
+            y_var="y",
+            x_var="x",
+            z_var="z",
+        )
+        result = analysis.run_analysis(verbose=False, run_hausman=True)
+
+        assert result.hausman is not None
+        assert isinstance(result.hausman, HausmanResult)
+        assert result.hausman.statistic >= 0
+        assert 0 <= result.hausman.p_value <= 1
+        assert result.hausman.degrees_of_freedom > 0
+        assert result.hausman.conclusion in ("SYSTEMATIC_BIAS", "NO_SYSTEMATIC_BIAS")
+
+    def test_hausman_skipped_when_disabled(self, balanced_panel: pd.DataFrame) -> None:
+        analysis = DoubleDemeanAnalysis(
+            data=balanced_panel,
+            unit_var="unit_id",
+            time_var="time_id",
+            y_var="y",
+            x_var="x",
+            z_var="z",
+        )
+        result = analysis.run_analysis(verbose=False, run_hausman=False)
+        assert result.hausman is None
