@@ -139,16 +139,12 @@ dmypy.json
 .DS_Store
 Thumbs.db
 
-# Dashboard-specific large files
+# Large source files (raw Sciensano CSVs that feed data_processing)
 data_public/COVID19BE_CASES_MUNI.csv
 data_public/COVID19BE_VACC_MUNI_CUM.csv
 
-# Large geospatial files (optional, auto-downloaded)
+# Auto-downloaded statistical-sectors shapefile (regenerable from StatBel)
 data_public/shapefiles/
 
-# BUT KEEP essential small data files needed for deployment:
-# !data/population_by_NIS.xlsx (1.3MB - essential)
-# !data/si_be_muni_daily.xlsx (662KB - essential)
-
-# Development files with personal paths
-dashboard_code_original.ipynb
+# Local-only build artefacts for the Claude Design dashboard
+claude_design_inputs/
